@@ -157,6 +157,11 @@ bundle-scoped load path in HostSupport.
   it writes, and Resolume then skips those plugins silently. The generator clears
   the attribute unconditionally, because that case cannot be reproduced from a
   local build.
+- **Paths are displayed `~`-abbreviated and expanded before use.** The window ends
+  up in screenshots and in a published video, and the account name does not
+  belong in either. Note that `HOME=` does not help: `NSHomeDirectory()` ignores
+  the environment for a normal .app, which was measured, so abbreviating on
+  display is the only lever there is.
 - **Only Arena and Avenue scan `Extra Effects`.** `strings` finds that path in
   the Arena binary and not in Alley's or Wire's, even though all three link the
   same FFGL engine — so buttons for those two are offered with a caveat, not as
