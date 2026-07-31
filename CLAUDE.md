@@ -35,6 +35,8 @@ A clean machine has no OFX plugins, even with Resolve installed. Build some:
 ```bash
 ./build/ffgltest <bundle> --size 3840x2160 --bench 60   # measure
 ./build/ffgltest <bundle> --legacy-gl                   # immediate-mode GL plugins
+./build/ffgltest <bundle> --expect-centre 64,64,64,127  # assert, exit 1 on mismatch
+./build/ffgltest <bundle> --require-gpu                 # exit 3 if software renderer
 ```
 
 ## Release

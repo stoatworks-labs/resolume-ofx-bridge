@@ -12,6 +12,12 @@
 // minus Resolume.
 //
 //   ffgltest <bundle> [param=value]... [--demo out.bmp]
+//                     [--expect-centre R,G,B,A] [--require-gpu]
+//
+// --expect-centre asserts the centre pixel and exits 1 on mismatch, so a test
+// cannot pass by rendering a black frame. --require-gpu exits 3 when only a
+// software renderer is present, letting CI skip GPU paths honestly instead of
+// running them and reporting a meaningless pass.
 //
 // --demo runs a larger colour test pattern through the effect and writes a
 // side-by-side before/after image, so the documentation shows real plugin
@@ -234,6 +240,8 @@ int main( int argc, char** argv )
 	std::string demoPath;
 	int benchFrames = 0;
 	bool legacyGL   = false;
+	bool requireGpu = false;
+	int expect[ 4 ]  = { -1, -1, -1, -1 };
 	for( int i = 2; i < argc; ++i )
 	{
 		const std::string a = argv[ i ];
@@ -241,6 +249,17 @@ int main( int argc, char** argv )
 			demoPath = argv[ i + 1 ];
 		else if( a == "--legacy-gl" )
 			legacyGL = true;
+		else if( a == "--require-gpu" )
+			requireGpu = true;
+		else if( a == "--expect-centre" && i + 1 < argc )
+		{
+			if( sscanf( argv[ i + 1 ], "%d,%d,%d,%d", &expect[ 0 ], &expect[ 1 ], &expect[ 2 ],
+						&expect[ 3 ] ) != 4 )
+			{
+				fprintf( stderr, "--expect-centre expects R,G,B,A\n" );
+				return 2;
+			}
+		}
 		else if( a == "--bench" && i + 1 < argc )
 			benchFrames = atoi( argv[ i + 1 ] );
 		else if( a == "--size" && i + 1 < argc )
@@ -270,8 +289,18 @@ int main( int argc, char** argv )
 	if( ctx == nullptr )
 		return 1;
 
-	printf( "GL renderer: %s\n", glGetString( GL_RENDERER ) );
+	const char* renderer = (const char*)glGetString( GL_RENDERER );
+	printf( "GL renderer: %s\n", renderer );
 	printf( "GL version : %s\n", glGetString( GL_VERSION ) );
+
+	// A software renderer cannot do IOSurface-backed GL/Metal sharing, so the GPU
+	// paths would "succeed" while producing nothing. Say so and skip, rather than
+	// report a pass that means nothing.
+	if( requireGpu && renderer != nullptr && strstr( renderer, "Software" ) != nullptr )
+	{
+		printf( "skipping: software renderer, no GPU available for this path\n" );
+		return 3;
+	}
 
 	void* handle = dlopen( binary.c_str(), RTLD_NOW | RTLD_LOCAL );
 	if( handle == nullptr )
@@ -432,6 +461,22 @@ int main( int argc, char** argv )
 			printf( "wrote %s (%dx%d, before | after)\n", demoPath.c_str(), gWidth * 2 + 8, gHeight );
 		else
 			fprintf( stderr, "could not write %s\n", demoPath.c_str() );
+	}
+
+	if( expect[ 0 ] >= 0 )
+	{
+		const int got[ 4 ] = { outPixels[ mid ], outPixels[ mid + 1 ], outPixels[ mid + 2 ],
+							   outPixels[ mid + 3 ] };
+		if( got[ 0 ] != expect[ 0 ] || got[ 1 ] != expect[ 1 ] || got[ 2 ] != expect[ 2 ] ||
+			got[ 3 ] != expect[ 3 ] )
+		{
+			fprintf( stderr,
+					 "FAIL: centre pixel is %d,%d,%d,%d but %d,%d,%d,%d was expected\n",
+					 got[ 0 ], got[ 1 ], got[ 2 ], got[ 3 ], expect[ 0 ], expect[ 1 ], expect[ 2 ],
+					 expect[ 3 ] );
+			return 1;
+		}
+		printf( "centre pixel matches %d,%d,%d,%d\n", expect[ 0 ], expect[ 1 ], expect[ 2 ], expect[ 3 ] );
 	}
 
 	plugMain( FF_DEINSTANTIATE_GL, zero, instance );

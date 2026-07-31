@@ -160,6 +160,23 @@ Measured on an M4 Max, pipelined:
 On the CPU path the transfer costs ~2.2 ms at both resolutions — latency-bound
 rather than bandwidth-bound, because memory is unified.
 
+## What CI does and does not cover
+
+The release workflow runs the introspection, CPU render, generation and bundle
+checks on every tag, and asserts actual pixel values rather than exit codes — a
+black frame fails.
+
+It **cannot** verify the GPU paths. GitHub's hosted macOS runners report
+`Apple Software Renderer` and have no GPU, and IOSurface-backed GL/Metal sharing
+cannot work there. `ffgltest --require-gpu` exits 3 in that case and CI skips
+with a notice.
+
+That was found the hard way: the first Metal CI run reported success while
+producing an entirely black frame, because the check only looked at the exit
+code. Both the assertion and the explicit skip exist because of it.
+
+**So every GPU result in this document comes from a real M4 Max, not from CI.**
+
 ## What is *not* verified
 
 - **Nothing has run inside Resolume.** Every GL test uses our own offscreen
@@ -179,6 +196,8 @@ rather than bandwidth-bound, because memory is unified.
   core-profile path that ships.
 - **Windows and Linux are untried.** The code paths exist; `ffgltest` is
   macOS-only, as it creates its context with CGL directly.
+- **The GPU paths on any machine but the author's.** CI cannot run them, so
+  there is exactly one data point of hardware.
 - **No sustained run.** Nothing has been left running long enough to surface a
   leak in the per-resize instance rebuild.
 

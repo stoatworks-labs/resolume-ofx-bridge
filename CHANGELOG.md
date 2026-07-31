@@ -5,6 +5,21 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-07-31
+
+### Fixed
+
+- **CI self-tests now assert pixel values, not exit codes.** The first Metal CI
+  run reported success while rendering an entirely black frame, because the check
+  only looked at the process status. `ffgltest --expect-centre R,G,B,A` now fails
+  on a wrong pixel.
+- **GPU self-tests skip honestly rather than passing meaninglessly.** GitHub's
+  hosted macOS runners have no GPU (`Apple Software Renderer`), where
+  IOSurface-backed GL/Metal sharing cannot work. `--require-gpu` exits 3 and CI
+  skips with a notice; any other failure is now fatal.
+
+All GPU measurements in the docs come from real hardware, never from CI.
+
 ## [0.3.0] — 2026-07-31
 
 ### Added
@@ -101,6 +116,7 @@ harnesses in this repo, but never loaded into Resolume itself.
 - `createEffect` loads every bundle in the target's directory, because
   HostSupport's `addFileToPath` is directory-scoped.
 
+[0.3.1]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.1
 [0.3.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.1.0

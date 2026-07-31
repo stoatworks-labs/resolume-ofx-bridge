@@ -65,12 +65,27 @@ jobs:
           # The GL render path needs a legacy profile for this plugin; see
           # docs/04-gpu-acceleration.md. Runners are headless, so a failure to
           # create a context is tolerated -- what must not break is the build.
-          ./build/ffgltest build/generated/OFX_OpenGL_Example.bundle --legacy-gl || \
-            echo "::warning::GL render self-test could not run (no GL context on this runner)"
-          # Metal path. Gain 0.5 must halve every channel; a host that fell back
-          # to CPU would fail outright, because the test plugin is GPU-only.
-          ./build/ffgltest build/generated/Metal_Gain_Example.bundle 0=0.5 || \
-            echo "::warning::Metal self-test could not run on this runner"
+          # Assert actual pixels, not just an exit code: a black frame must fail.
+          ./build/ffgltest build/generated/OFX_Invert_Example.bundle \
+            --expect-centre 127,127,127,0
+
+          # The GPU paths need a real GPU. Hosted runners have only the Apple
+          # Software Renderer, on which IOSurface-backed GL/Metal sharing cannot
+          # work -- so --require-gpu exits 3 and we skip, rather than reporting a
+          # pass that means nothing. Any other non-zero status is a real failure.
+          for t in "OFX_OpenGL_Example.bundle --legacy-gl" \
+                   "Metal_Gain_Example.bundle 0=0.5 --expect-centre 64,64,64,127"; do
+            set +e
+            ./build/ffgltest build/generated/$t --require-gpu
+            rc=$?
+            set -e
+            if [ $rc -eq 3 ]; then
+              echo "::notice::skipped GPU self-test ($t): no GPU on this runner"
+            elif [ $rc -ne 0 ]; then
+              echo "::error::GPU self-test failed ($t)"
+              exit 1
+            fi
+          done
 
       - name: Stage the release archive
         run: |
