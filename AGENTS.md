@@ -136,6 +136,10 @@ OpenFX examples:
   expected parameter table (group and page params dropped, ranges preserved,
   children grouped under the OFX group's label, choice elements in plugin order).
 
+- **Texture orientation needs no correction.** OFX images are bottom-up and FFGL
+  textures are bottom-left-origin, so they agree and the code applies no flip.
+  Confirmed empirically: in the demo images the grey wedge stays along the bottom
+  edge on both sides.
 - **The full GL path works.** `ffgltest` creates an offscreen CGL context
   (GL 4.1 core, as Resolume uses), hands the wrapper a texture, and calls
   `FF_INSTANTIATE_GL` / `FF_SET_PARAMETER` / `FF_PROCESS_OPENGL` exactly as a
