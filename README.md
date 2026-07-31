@@ -21,6 +21,25 @@ units, ranges and groupings, in Resolume's own UI.
 it converts are the OpenFX examples built from source; nothing was installed into
 a real Resolume folder to film it.*
 
+<!-- downloads:start -->
+
+## Download
+
+**[v0.5.1](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.5.1)** — prebuilt for macOS. Pick your platform:
+
+<details>
+<summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| Universal (Apple Silicon + Intel) · .zip archive | [`resolume-ofx-bridge-macos-universal.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-macos-universal.zip) | 2.7 MB |
+
+</details>
+
+All builds, checksums and release notes: [github.com/stoatworks-labs/resolume-ofx-bridge/releases](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases).
+
+<!-- downloads:end -->
+
 ## What it looks like
 
 Real output from the OpenFX `Invert` example, rendered through the generated FFGL
