@@ -15,6 +15,12 @@ A standalone generator scans your OFX plugin folders and emits one FFGL bundle
 per plugin, each exposing that plugin's real parameters, with their real names,
 units, ranges and groupings, in Resolume's own UI.
 
+[![Watch it running — 33 seconds](docs/video-thumb.png)](https://www.youtube.com/watch?v=-ruvWTiDpa4)
+
+*A 33-second tour of the real app, driven through its own controls. The plugins
+it converts are the OpenFX examples built from source; nothing was installed into
+a real Resolume folder to film it.*
+
 ## What it looks like
 
 Real output from the OpenFX `Invert` example, rendered through the generated FFGL
