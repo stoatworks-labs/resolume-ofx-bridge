@@ -72,6 +72,33 @@ system. Users do not need Xcode/MSVC.
 - `CMAKE_OSX_ARCHITECTURES` must be set before `project()` or a "universal" build
   silently ships single-arch. Verify artefacts with `lipo`, not the build log.
 
+### HostSupport traps (each of these cost real debugging time)
+
+- **`Instance::getClipPreferences()` returns `bool`, not `OfxStatus`.** Every
+  neighbouring action returns a status, so comparing it against `kOfxStatOK`
+  looks right and turns success (`true` == 1) into an error.
+- **`ImageEffectPlugin::createInstance()` already calls `populate()`**
+  (`ofxhImageEffectAPI.cpp:251`). Calling it again fails on duplicate parameter
+  names — and only for plugins that *have* parameters, so a no-param plugin will
+  happily hide the bug.
+- **`PluginCache::addFileToPath()` takes a directory, not a bundle.** Passing a
+  `.ofx.bundle` path finds nothing, with no error.
+- HostSupport declares every `Param::*Instance` abstract; the host supplies the
+  storage. See `Params.{h,cpp}`.
+
+### FFGL traps
+
+- **`FFInstanceID` is `void*`, not a 32-bit id.** Declaring `plugMain`'s third
+  parameter as `FFUInt32` corrupts the call frame on 64-bit.
+- **`FF_FAIL` is `0xFFFFFFFF` returned in the `FFMixed` union's integer member.**
+  Reading that back as `PointerValue` gives a non-null pointer that faults on
+  dereference. Filter every pointer result.
+- **`FF_GET_PARAM_GROUP` takes a `GetStringStruct*`, not an index** — the caller
+  supplies the buffer, and the plugin does not nul-terminate.
+- **`FF_EFFECT` is 0 and `FF_SOURCE` is 1**, which is the opposite of the guess.
+- **`SetOptionParamInfo()` does not set a range.** Without a following
+  `SetParamRange()`, a choice param reports 0..1 no matter how many options.
+
 ## Host identification
 
 The host reports itself honestly as `com.stoatworks.ofxbridge`. Some commercial
@@ -80,14 +107,29 @@ host-name spoofing** — that is licence circumvention, not compatibility work.
 
 ## Verified vs assumed
 
-Verified on this machine (macOS arm64):
-- HostSupport builds; `ofxprobe` loads real OFX bundles and extracts plugin
-  metadata, param types, labels, hints, group parenting, display ranges and
-  choice options; manifest JSON round-trips through `json.load`.
-- Correctly declines a General-context-only plugin (`custom.ofx`).
+Verified on this machine (macOS arm64), against four OFX plugins built from the
+OpenFX examples:
+
+- `ofxprobe` extracts plugin metadata, param types, labels, hints, group
+  parenting, display ranges and choice options; manifest JSON round-trips
+  through `json.load`. A General-context-only plugin is correctly declined.
+- **CPU rendering works.** `ofxprobe --render` pushes a frame through a real
+  plugin: Invert produces exact complements; Gain with `--set scale=0.5` halves
+  every channel (128 -> 64) and with `scale=2` saturates; ChoiceParams zeroes red
+  and green at its default options.
+- **Parameters reach the plugin**, via the same `Effect::setParamValue` path the
+  FFGL wrapper uses.
+- `ofxgen generate` emits loadable FFGL bundles, and `ofxgen verify` dlopens one
+  exactly as a host would: correct effect type, deterministic 4-char id, and the
+  expected parameter table (group and page params dropped, ranges preserved,
+  children grouped under the OFX group's label, choice elements in plugin order).
 
 Assumed / not yet done:
-- Nothing has been rendered. `Effect::render` is written but never exercised.
-- No FFGL wrapper exists yet, so nothing has run inside Resolume.
-- GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only.
-- Windows and Linux are untried.
+- **Nothing has run inside Resolume.** The FFGL bundle has never been loaded by
+  the real host, and `ProcessOpenGL` has never executed — there is no GL context
+  in any test, so the readback/blit path is entirely unexercised.
+- Premultiplication is asserted, not verified against Resolume's actual output.
+- GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only, which means
+  a full texture round trip per frame.
+- Windows and Linux are untried; `ofxgen verify` is macOS/Linux only.
+- No generator GUI yet.

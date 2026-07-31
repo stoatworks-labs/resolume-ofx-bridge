@@ -183,22 +183,19 @@ Effect::Effect( OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 
 bool Effect::init( std::string& error )
 {
-	OfxStatus st = populate();
-	if( st != kOfxStatOK )
-	{
-		error = "populate() failed";
-		return false;
-	}
-
-	st = createInstanceAction();
+	// Note: populate() is NOT called here. ImageEffectPlugin::createInstance
+	// already does it, and calling it twice fails on duplicate parameter names.
+	OfxStatus st = createInstanceAction();
 	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
 	{
 		error = "kOfxActionCreateInstance failed";
 		return false;
 	}
 
-	st = getClipPreferences();
-	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	// Note: unlike the other actions, getClipPreferences returns a bool, not an
+	// OfxStatus. Comparing it against kOfxStatOK reads success (true == 1) as an
+	// error code.
+	if( !getClipPreferences() )
 	{
 		error = "kOfxImageEffectActionGetClipPreferences failed";
 		return false;
@@ -262,6 +259,9 @@ OFX::Host::ImageEffect::ClipInstance* Effect::newClipInstance( OFX::Host::ImageE
 OFX::Host::Param::Instance* Effect::newParam( const std::string& name, OFX::Host::Param::Descriptor& descriptor )
 {
 	OFX::Host::Param::Instance* p = makeParamInstance( name, descriptor, this );
+	if( getenv( "OFXBRIDGE_DEBUG" ) )
+		fprintf( stderr, "[newParam] %-20s %-24s -> %s\n", name.c_str(), descriptor.getType().c_str(),
+				 p ? "ok" : "NULL" );
 	if( p == nullptr )
 		_messages.push_back( "unsupported param type '" + descriptor.getType() + "' for param '" + name + "'" );
 	return p;

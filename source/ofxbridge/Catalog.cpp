@@ -5,6 +5,8 @@
 #include "ofxImageEffect.h"
 
 #include <cstdlib>
+#include <map>
+#include <memory>
 #include <sstream>
 
 namespace ofxbridge {
@@ -355,6 +357,80 @@ std::string toManifestJson( const PluginDesc& p )
 
 	o << "  ]\n}\n";
 	return o.str();
+}
+
+std::unique_ptr< Effect > createEffect( Host& host,
+										const std::string& bundlePath,
+										const std::string& identifier,
+										std::string& error )
+{
+	// The plugin cache owns the loaded binary and every descriptor hanging off
+	// it, so it must outlive the instance. One cache per bundle path is kept for
+	// the life of the process; a wrapper only ever needs one.
+	static std::map< std::string, std::unique_ptr< OFX::Host::ImageEffect::PluginCache > > caches;
+	static std::map< std::string, std::unique_ptr< OFX::Host::PluginCache > > binaryCaches;
+
+	auto it = caches.find( bundlePath );
+	if( it == caches.end() )
+	{
+		auto ieCache = std::make_unique< OFX::Host::ImageEffect::PluginCache >( host );
+		auto cache   = std::make_unique< OFX::Host::PluginCache >();
+		cache->registerAPICache( kOfxImageEffectPluginApi, 1, 1, ieCache.get() );
+		// addFileToPath takes a directory to scan, not a bundle, so point it at the
+		// bundle's parent and rely on the identifier match below to pick ours out.
+		const size_t slash = bundlePath.find_last_of( "/\\" );
+		cache->addFileToPath( slash == std::string::npos ? bundlePath : bundlePath.substr( 0, slash ) );
+		cache->scanPluginFiles();
+
+		binaryCaches[ bundlePath ] = std::move( cache );
+		it = caches.emplace( bundlePath, std::move( ieCache ) ).first;
+	}
+
+	OFX::Host::ImageEffect::ImageEffectPlugin* found = nullptr;
+	for( auto* p : it->second->getPlugins() )
+	{
+		if( p->getIdentifier() == identifier )
+		{
+			found = p;
+			break;
+		}
+	}
+
+	if( found == nullptr )
+	{
+		error = "bundle " + bundlePath + " does not contain plugin " + identifier;
+		return nullptr;
+	}
+
+	OFX::Host::ImageEffect::Instance* instance = nullptr;
+	try
+	{
+		if( found->getContext( kOfxImageEffectContextFilter ) == nullptr )
+		{
+			error = identifier + " does not support the Filter context";
+			return nullptr;
+		}
+		instance = found->createInstance( kOfxImageEffectContextFilter, nullptr );
+	}
+	catch( const std::exception& e )
+	{
+		error = std::string( "creating instance threw: " ) + e.what();
+		return nullptr;
+	}
+	catch( ... )
+	{
+		error = "creating instance threw an unknown exception";
+		return nullptr;
+	}
+
+	Effect* effect = dynamic_cast< Effect* >( instance );
+	if( effect == nullptr )
+	{
+		delete instance;
+		error = "host produced an unexpected instance type";
+		return nullptr;
+	}
+	return std::unique_ptr< Effect >( effect );
 }
 
 } // namespace ofxbridge

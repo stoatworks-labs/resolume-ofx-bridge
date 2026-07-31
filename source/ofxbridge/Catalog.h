@@ -9,6 +9,7 @@
 // PluginDesc rather than propagated.
 //
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -83,5 +84,22 @@ std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& sea
 /// Serialise a described plugin to the JSON manifest a generated wrapper reads
 /// at load time.
 std::string toManifestJson( const PluginDesc& plugin );
+
+class Host;
+class Effect;
+
+/// Load one bundle and create an instance of the plugin with `identifier` in the
+/// Filter context.
+///
+/// Deliberately scoped to a single bundle: a generated wrapper knows exactly
+/// which plugin it represents, and scanning the whole system here would pull
+/// every installed OFX plugin into a live video process.
+///
+/// Returns nullptr with `error` set on failure. The returned effect has *not*
+/// had init() called on it yet, so the caller can set a frame size first.
+std::unique_ptr< Effect > createEffect( Host& host,
+										const std::string& bundlePath,
+										const std::string& identifier,
+										std::string& error );
 
 } // namespace ofxbridge

@@ -67,3 +67,52 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable( ofxprobe source/probe/main.cpp )
 target_link_libraries( ofxprobe PRIVATE ofxbridge )
+
+# ---------------------------------------------------------------------------
+# ofxwrapper - the generic FFGL plugin
+#
+# One build of this binary is *copied* per OFX plugin by the generator; each
+# copy reads a manifest stored beside it to learn which effect it hosts. That is
+# why nothing here is specialised to a particular plugin.
+# ---------------------------------------------------------------------------
+if( NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/ffgl/CMakeLists.txt" )
+	message( FATAL_ERROR "external/ffgl is missing. Run: git submodule update --init --recursive" )
+endif()
+
+set( FFGL_BUILD_EXAMPLE_PLUGINS OFF CACHE BOOL "" FORCE )
+add_subdirectory( external/ffgl EXCLUDE_FROM_ALL )
+
+add_library( ofxwrapper MODULE
+	source/ffgl/PluginMain.cpp
+	source/ffgl/OfxFFGLPlugin.cpp
+	source/ffgl/Manifest.cpp
+	source/ffgl/Json.cpp
+	source/ffgl/SelfPath.cpp
+)
+target_include_directories( ofxwrapper PRIVATE source/ffgl )
+target_link_libraries( ofxwrapper PRIVATE ffgl::sdk ofxbridge )
+
+if( NOT APPLE )
+	find_package( GLEW REQUIRED )
+	target_link_libraries( ofxwrapper PRIVATE GLEW::GLEW )
+endif()
+
+if( APPLE )
+	set_target_properties( ofxwrapper PROPERTIES
+		BUNDLE TRUE
+		BUNDLE_EXTENSION "bundle"
+		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/Info.plist.in"
+		MACOSX_BUNDLE_BUNDLE_NAME "OFX Wrapper"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "com.stoatworks.ffgl.ofxwrapper"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+	)
+	# FFGL hosts resolve plugMain by symbol name, so keep default visibility.
+	target_link_libraries( ofxwrapper PRIVATE "-framework OpenGL" )
+endif()
+
+# ---------------------------------------------------------------------------
+# ofxgen - the generator CLI
+# ---------------------------------------------------------------------------
+add_executable( ofxgen source/gen/main.cpp )
+target_link_libraries( ofxgen PRIVATE ofxbridge )
+add_dependencies( ofxgen ofxwrapper )
