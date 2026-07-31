@@ -28,6 +28,11 @@ do:
 
 ![Gain at 1.8, before and after](docs/demo-gain.png)
 
+And the same again from a plugin rendering entirely on the **GPU with Metal** —
+pixel-equivalent to the CPU result, at 5.4× the speed:
+
+![Metal gain at 1.8, before and after](docs/demo-metal.png)
+
 Neither image is a mock-up; both are written by
 [`ffgltest --demo`](docs/03-verification.md) straight out of the plugin's
 framebuffer.
@@ -152,13 +157,14 @@ ranges survive intact.
 - **Only the Filter context** is hosted, since that is what maps onto an effect
   slot in a Resolume clip. Generator, Transition and General-only plugins are
   reported and skipped.
-- **Mostly CPU rendering.** A plugin advertising OFX *OpenGL render* gets the GL
-  texture directly with no CPU round trip; everything else takes the CPU path, a
-  full GPU → CPU → GPU trip per frame. Measured at 2.25 ms/frame at 1080p and
-  2.94 ms at 4K on an M4 Max — see
-  [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md). The Metal, CUDA and
-  OpenCL render extensions are **not** implemented, which means GPU-only plugins
-  (common among Resolve-targeted ones) will not load at all.
+- **GPU rendering via Metal or OpenGL; CPU otherwise.** A plugin advertising OFX
+  *Metal render* — what Resolve-targeted plugins on macOS use — renders on the
+  GPU with no CPU round trip, **5.4× faster at 1080p** and 3.6× at 4K. OFX
+  *OpenGL render* is supported too. Everything else takes the CPU path, a full
+  GPU → CPU → GPU trip per frame. See
+  [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md).
+- **CUDA and OpenCL are not implemented**, so GPU-only plugins that use those
+  (Resolve on Windows and Linux) will not run. macOS Metal plugins will.
 - **OpenGL-render plugins must use core-profile GL** to work in Resolume.
   Immediate-mode drawing is illegal in a core profile and macOS has no
   compatibility profile above 2.1.

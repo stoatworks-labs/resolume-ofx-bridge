@@ -53,17 +53,17 @@ struct Frame
 class Host;
 class Effect;
 
-/// Wraps a Frame in the property set an OFX plugin expects from clipGetImage.
+/// The property set an OFX plugin expects from clipGetImage.
+///
+/// `data` is a CPU pointer on the normal path and an `id<MTLBuffer>` on the
+/// Metal path — the OFX contract is that kOfxImagePropData means whichever the
+/// host said it enabled, so one class serves both.
 class Image : public OFX::Host::ImageEffect::Image
 {
 public:
-	Image( Frame& frame, double renderScaleX, double renderScaleY, const std::string& premult );
+	Image( void* data, int rowBytes, int width, int height, const std::string& bitDepth,
+		   const std::string& components, const std::string& premult );
 	~Image() override = default;
-
-	OfxRectI getBounds() const;
-
-private:
-	Frame& _frame;
 };
 
 /// One clip (input "Source" or "Output") on an effect instance.
@@ -96,6 +96,20 @@ public:
 		_frame = frame;
 	}
 
+	/// Point this clip at an `id<MTLBuffer>` for the duration of one render.
+	/// Taken as void* so this header stays free of Objective-C.
+	void setMetalBuffer( void* buffer, int rowBytes, int width, int height )
+	{
+		_metalBuffer   = buffer;
+		_metalRowBytes = rowBytes;
+		_metalWidth    = width;
+		_metalHeight   = height;
+	}
+	void clearMetalBuffer()
+	{
+		_metalBuffer = nullptr;
+	}
+
 	/// Point this clip at an OpenGL texture for the duration of one render.
 	///
 	/// Taken as a plain unsigned so this header stays free of GL headers —
@@ -116,6 +130,11 @@ private:
 	Effect* _effect;
 	Frame* _frame = nullptr;
 	bool _isOutput;
+
+	void* _metalBuffer = nullptr;
+	int _metalRowBytes = 0;
+	int _metalWidth    = 0;
+	int _metalHeight   = 0;
 
 	unsigned int _textureName   = 0;
 	unsigned int _textureTarget = 0;
@@ -158,6 +177,18 @@ public:
 	/// called with the context current.
 	bool attachGLContext( std::string& error );
 	void detachGLContext();
+
+	/// True if this plugin advertises OFX Metal render.
+	bool supportsMetalRender() const;
+
+	/// Render via OFX Metal render. The buffers are `id<MTLBuffer>` and
+	/// `commandQueue` an `id<MTLCommandQueue>`, passed as void* to keep this
+	/// header free of Objective-C.
+	///
+	/// The plugin is not required to wait for completion — the host owns the
+	/// queue and decides when to synchronise.
+	bool renderMetal( void* sourceBuffer, void* outputBuffer, int rowBytes, void* commandQueue,
+					  int width, int height, double time, std::string& error );
 
 	// -- Instance interface -----------------------------------------------------
 	OFX::Host::ImageEffect::ClipInstance* newClipInstance( OFX::Host::ImageEffect::Instance* effect,

@@ -67,6 +67,10 @@ jobs:
           # create a context is tolerated -- what must not break is the build.
           ./build/ffgltest build/generated/OFX_OpenGL_Example.bundle --legacy-gl || \
             echo "::warning::GL render self-test could not run (no GL context on this runner)"
+          # Metal path. Gain 0.5 must halve every channel; a host that fell back
+          # to CPU would fail outright, because the test plugin is GPU-only.
+          ./build/ffgltest build/generated/Metal_Gain_Example.bundle 0=0.5 || \
+            echo "::warning::Metal self-test could not run on this runner"
 
       - name: Stage the release archive
         run: |

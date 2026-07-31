@@ -72,6 +72,10 @@ struct PluginDesc
 	/// the CPU.
 	bool supportsOpenGLRender = false;
 
+	/// True if the plugin advertises OFX Metal render. Such plugins are often
+	/// GPU-only: without this path they do not render slowly, they fail.
+	bool supportsMetalRender = false;
+
 	std::vector< ParamDesc > params;
 
 	/// Non-empty if describe failed; the plugin is then unusable.

@@ -5,6 +5,34 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-07-31
+
+### Added
+
+- **OFX Metal render path** — the one Resolve-targeted plugins on macOS actually
+  use. GL texture and Metal buffer share one IOSurface, so no pixel crosses to
+  the CPU and there are no copies at all: just two on-GPU blits.
+  **5.4× faster at 1080p** (2.14 ms → 0.40 ms) and 3.6× at 4K
+  (3.20 ms → 0.90 ms). More importantly, **GPU-only plugins can now run at all** —
+  before this they did not render slowly, they refused to render.
+- **A Metal OFX test plugin** (`testplugins/metal-gain/`). No such plugin is
+  publicly available — the OpenFX examples are all CPU or OpenGL, and commercial
+  Metal plugins refuse to load in an unrecognised host — so without it the Metal
+  path could not be developed or verified. It is deliberately GPU-only, so a host
+  that silently falls back to CPU is caught rather than flattered.
+
+### Verified
+
+Gain at 0.5 halves every channel including alpha; at 2.0 it saturates; at its
+default of 1.0 it is bit-exact identity, ruling out a blit-through that would
+otherwise look like success. The demo image is visually identical to the CPU
+result, confirming channel order survives the BGRA IOSurface round trip.
+
+### Still missing
+
+CUDA and OpenCL, which is what Resolve uses on Windows and Linux — platforms this
+project has never been compiled for.
+
 ## [0.2.0] — 2026-07-31
 
 ### Added
@@ -73,5 +101,6 @@ harnesses in this repo, but never loaded into Resolume itself.
 - `createEffect` loads every bundle in the target's directory, because
   HostSupport's `addFileToPath` is directory-scoped.
 
+[0.3.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.1.0

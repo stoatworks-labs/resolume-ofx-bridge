@@ -47,6 +47,8 @@ struct Manifest
 	int indexInBundle = 0;
 	/// Whether the plugin can take the GL texture path.
 	bool supportsOpenGLRender = false;
+	/// Whether the plugin can take the Metal buffer path.
+	bool supportsMetalRender = false;
 	std::vector< ManifestParam > params;
 
 	static bool load( const std::string& path, Manifest& out, std::string& error );

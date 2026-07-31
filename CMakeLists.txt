@@ -97,6 +97,15 @@ add_library( ofxwrapper MODULE
 	source/ffgl/Json.cpp
 	source/ffgl/SelfPath.cpp
 )
+
+if( APPLE )
+	# Objective-C++: the GL <-> Metal interop needs Metal and IOSurface.
+	# ARC, so the Metal objects held in MetalBridge are actually retained.
+	target_sources( ofxwrapper PRIVATE source/ffgl/MetalBridge.mm )
+	set_source_files_properties( source/ffgl/MetalBridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc" )
+	target_link_libraries( ofxwrapper PRIVATE
+		"-framework Metal" "-framework IOSurface" "-framework Foundation" )
+endif()
 target_include_directories( ofxwrapper PRIVATE source/ffgl )
 target_link_libraries( ofxwrapper PRIVATE ffgl::sdk ofxbridge )
 

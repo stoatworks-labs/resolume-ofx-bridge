@@ -105,6 +105,20 @@ system. Users do not need Xcode/MSVC.
   compatibility profile above 2.1. `ffgltest --legacy-gl` exists only to test
   such plugins; it is not how Resolume runs.
 
+### Metal render path
+
+- **`CGLTexImageIOSurface2D` accepts only `GL_TEXTURE_RECTANGLE`**, never
+  `GL_TEXTURE_2D`. macOS constraint, not a choice.
+- **IOSurface pads rows**, so `rowBytes != width * 4`. A kernel assuming
+  otherwise shears the image.
+- **IOSurface gives coherency, not ordering.** `glFlush` after the GL blit before
+  Metal reads; wait on the Metal queue before GL reads the output. The OFX
+  contract explicitly lets a plugin return before its work completes.
+- **`newBufferWithBytesNoCopy` over `IOSurfaceGetBaseAddress`** is what makes this
+  zero-copy. Base addresses are page-aligned, which that call requires.
+- `MetalBridge.mm` needs `-fobjc-arc`, or the Metal objects it holds are not
+  retained.
+
 ### Known limitation
 
 `createEffect` loads every OFX bundle in the target bundle's directory, because
@@ -169,4 +183,5 @@ Assumed / not yet done:
 - GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only, which means
   a full texture round trip per frame.
 - Windows and Linux are untried; `ofxgen verify` is macOS/Linux only.
+- CUDA and OpenCL are not implemented (Resolve uses them on Windows/Linux).
 - No generator GUI yet.

@@ -25,7 +25,8 @@ So the corpus is built from the OpenFX project's example plugins:
 | `Basic` (Gain) | doubles with display ranges, a boolean, a group, a page |
 | `ChoiceParams` | choice parameters with named options |
 | `Custom` | General context only — exercises the "cannot host this" path |
-| `OpenGL` | implements OFX OpenGL render — the only test subject for the GPU path |
+| `OpenGL` | implements OFX OpenGL render — the only test subject for that path |
+| `metalgain` | **ours**, not vendored: implements OFX Metal render, GPU-only |
 
 ## Level 1 — introspection
 
@@ -125,6 +126,23 @@ There is **no core-profile OFX GL plugin to test against**, so the path is prove
 against an immediate-mode plugin in a legacy context, and unproven in the profile
 Resolume actually runs.
 
+## Level 6 — the Metal render path
+
+```bash
+./build/ffgltest build/generated/Metal_Gain_Example.bundle 0=0.5
+```
+
+Verified: gain at 0.5 halves every channel including alpha
+(`128,128,128,255` → `64,64,64,127`), at 2.0 saturates, and at its default of 1.0
+is bit-exact identity — which rules out the blit-through case that would
+otherwise look like success. The demo image is visually identical to the CPU
+gain, confirming channel order survives the BGRA IOSurface round trip, which a
+uniform gain alone would hide.
+
+The test plugin is GPU-only by design: it returns `kOfxStatErrImageFormat` if the
+host has not set `kOfxImageEffectPropMetalEnabled`, so a host that quietly falls
+back to CPU fails the test rather than passing it.
+
 ## Performance
 
 ```bash
@@ -132,8 +150,14 @@ Resolume actually runs.
 OFXBRIDGE_TIMING=1 ./build/ffgltest <bundle> --size 1920x1080
 ```
 
-Measured on an M4 Max with the Gain example: 2.25 ms/frame at 1080p, 2.94 ms at
-4K, pipelined. The transfer costs ~2.2 ms at both resolutions — latency-bound
+Measured on an M4 Max, pipelined:
+
+| | CPU path | Metal path |
+|---|---|---|
+| 1080p | 2.14 ms | 0.40 ms |
+| 4K | 3.20 ms | 0.90 ms |
+
+On the CPU path the transfer costs ~2.2 ms at both resolutions — latency-bound
 rather than bandwidth-bound, because memory is unified.
 
 ## What is *not* verified

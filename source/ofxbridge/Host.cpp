@@ -43,24 +43,25 @@ void Frame::allocate( int w, int h, bool asFloat )
 // Image
 // ---------------------------------------------------------------------------
 
-Image::Image( Frame& frame, double renderScaleX, double renderScaleY, const std::string& premult ) :
-	OFX::Host::ImageEffect::Image(), _frame( frame )
+Image::Image( void* data, int rowBytes, int width, int height, const std::string& bitDepth,
+			  const std::string& components, const std::string& premult ) :
+	OFX::Host::ImageEffect::Image()
 {
-	OfxRectI bounds = { 0, 0, frame.width, frame.height };
+	OfxRectI bounds = { 0, 0, width, height };
 
 	setStringProperty( kOfxPropType, kOfxTypeImage );
-	setStringProperty( kOfxImageEffectPropPixelDepth, frame.bitDepth );
-	setStringProperty( kOfxImageEffectPropComponents, frame.components );
+	setStringProperty( kOfxImageEffectPropPixelDepth, bitDepth );
+	setStringProperty( kOfxImageEffectPropComponents, components );
 	setStringProperty( kOfxImageEffectPropPreMultiplication, premult );
 	setStringProperty( kOfxImagePropField, kOfxImageFieldNone );
-	setStringProperty( kOfxImagePropUniqueIdentifier, "ofxbridge-frame" );
+	setStringProperty( kOfxImagePropUniqueIdentifier, "ofxbridge-image" );
 
-	setDoubleProperty( kOfxImageEffectPropRenderScale, renderScaleX, 0 );
-	setDoubleProperty( kOfxImageEffectPropRenderScale, renderScaleY, 1 );
+	setDoubleProperty( kOfxImageEffectPropRenderScale, 1.0, 0 );
+	setDoubleProperty( kOfxImageEffectPropRenderScale, 1.0, 1 );
 	setDoubleProperty( kOfxImagePropPixelAspectRatio, 1.0 );
 
-	setPointerProperty( kOfxImagePropData, frame.data.data() );
-	setIntProperty( kOfxImagePropRowBytes, frame.rowBytes );
+	setPointerProperty( kOfxImagePropData, data );
+	setIntProperty( kOfxImagePropRowBytes, rowBytes );
 
 	// Bounds and RoD are identical for us: we never render a partial region.
 	setIntProperty( kOfxImagePropBounds, bounds.x1, 0 );
@@ -71,12 +72,6 @@ Image::Image( Frame& frame, double renderScaleX, double renderScaleY, const std:
 	setIntProperty( kOfxImagePropRegionOfDefinition, bounds.y1, 1 );
 	setIntProperty( kOfxImagePropRegionOfDefinition, bounds.x2, 2 );
 	setIntProperty( kOfxImagePropRegionOfDefinition, bounds.y2, 3 );
-}
-
-OfxRectI Image::getBounds() const
-{
-	OfxRectI r = { 0, 0, _frame.width, _frame.height };
-	return r;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,12 +198,21 @@ OFX::Host::ImageEffect::Texture* Clip::loadTexture( OfxTime /*time*/, const char
 
 OFX::Host::ImageEffect::Image* Clip::getImage( OfxTime /*time*/, const OfxRectD* /*optionalBounds*/ )
 {
+	// HostSupport expects a freshly retained image; the plugin releases it via
+	// clipReleaseImage, which drops the refcount and deletes it.
+
+	// On the Metal path kOfxImagePropData carries an id<MTLBuffer> rather than a
+	// CPU pointer, which is exactly what the OFX Metal contract specifies once
+	// the host has set kOfxImageEffectPropMetalEnabled.
+	if( _metalBuffer != nullptr )
+		return new Image( _metalBuffer, _metalRowBytes, _metalWidth, _metalHeight, kOfxBitDepthByte,
+						  kOfxImageComponentRGBA, getPremult() );
+
 	if( _frame == nullptr )
 		return nullptr;
 
-	// HostSupport expects a freshly retained image; the plugin releases it via
-	// clipReleaseImage, which drops the refcount and deletes it.
-	return new Image( *_frame, 1.0, 1.0, getPremult() );
+	return new Image( _frame->data.data(), _frame->rowBytes, _frame->width, _frame->height,
+					  _frame->bitDepth, _frame->components, getPremult() );
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +289,86 @@ bool Effect::render( Frame& in, Frame& out, double time, std::string& error )
 	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
 	{
 		error = "kOfxImageEffectActionRender failed";
+		return false;
+	}
+	return true;
+}
+
+bool Effect::supportsMetalRender() const
+{
+	const OFX::Host::Property::Set& props = getDescriptor().getProps();
+	return props.getStringProperty( kOfxImageEffectPropMetalRenderSupported ) == "true";
+}
+
+bool Effect::renderMetal( void* sourceBuffer, void* outputBuffer, int rowBytes, void* commandQueue,
+						  int width, int height, double time, std::string& error )
+{
+	_time = time;
+	setFrameSize( width, height );
+
+	Clip* source = dynamic_cast< Clip* >( getClip( kOfxImageEffectSimpleSourceClipName ) );
+	Clip* output = dynamic_cast< Clip* >( getClip( kOfxImageEffectOutputClipName ) );
+	if( output == nullptr )
+	{
+		error = "effect has no output clip";
+		return false;
+	}
+
+	if( source )
+		source->setMetalBuffer( sourceBuffer, rowBytes, width, height );
+	output->setMetalBuffer( outputBuffer, rowBytes, width, height );
+
+	OfxRectI window = { 0, 0, width, height };
+	OfxPointD scale = { 1.0, 1.0 };
+
+	OfxStatus st = beginRenderAction( time, time, 1.0, false, scale, false, false );
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "begin render failed";
+		if( source )
+			source->clearMetalBuffer();
+		output->clearMetalBuffer();
+		return false;
+	}
+
+	// As with the OpenGL path, HostSupport's renderAction cannot carry the extra
+	// properties, so the action is issued here. Metal needs two: the enable flag,
+	// and the command queue the plugin must encode onto.
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxPropTime, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxImageEffectPropFieldToRender, OFX::Host::Property::eString, 1, true, "" },
+		{ kOfxImageEffectPropRenderWindow, OFX::Host::Property::eInt, 4, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropSequentialRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropInteractiveRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropRenderQualityDraft, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropMetalEnabled, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropMetalCommandQueue, OFX::Host::Property::ePointer, 1, true, "" },
+		OFX::Host::Property::propSpecEnd
+	};
+
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setStringProperty( kOfxImageEffectPropFieldToRender, kOfxImageFieldNone );
+	inArgs.setDoubleProperty( kOfxPropTime, time );
+	inArgs.setIntPropertyN( kOfxImageEffectPropRenderWindow, &window.x1, 4 );
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	inArgs.setIntProperty( kOfxImageEffectPropSequentialRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropInteractiveRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropRenderQualityDraft, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropMetalEnabled, 1 );
+	inArgs.setPointerProperty( kOfxImageEffectPropMetalCommandQueue, commandQueue );
+
+	st = mainEntry( kOfxImageEffectActionRender, this->getHandle(), &inArgs, 0 );
+
+	endRenderAction( time, time, 1.0, false, scale, false, false );
+
+	if( source )
+		source->clearMetalBuffer();
+	output->clearMetalBuffer();
+
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "kOfxImageEffectActionRender (Metal) failed";
 		return false;
 	}
 	return true;
@@ -585,6 +669,10 @@ Host::Host()
 	// Plugins that don't (which is most Resolve-targeted ones, since Resolve uses
 	// Metal/CUDA rather than this) simply fall back to the CPU path.
 	_properties.setStringProperty( kOfxImageEffectPropOpenGLRenderSupported, "true" );
+
+	// Metal render. Many Resolve-targeted plugins are GPU-only, so without this
+	// they do not render slowly -- they refuse to render at all.
+	_properties.setStringProperty( kOfxImageEffectPropMetalRenderSupported, "true" );
 
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipDepths, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipPARs, 0 );

@@ -133,6 +133,8 @@ FFResult OfxFFGLPlugin::DeInitGL()
 {
 	releaseGLResources();
 	destroyEffect();
+	_metal.shutdown();
+	_metalReady = false;
 	return FF_SUCCESS;
 }
 
@@ -185,7 +187,31 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 		return false;
 	}
 
-	if( useGLPath() )
+	// Bring Metal up before deciding the path: useMetalPath() depends on it.
+	if( PluginContext::get().manifest.supportsMetalRender && !_metalReady && !_metalFailed )
+	{
+		std::string metalError;
+		if( _metal.init( metalError ) && _metal.resize( width, height, metalError ) )
+			_metalReady = true;
+		else
+			_metalFailed = true;
+	}
+	else if( _metalReady )
+	{
+		std::string metalError;
+		if( !_metal.resize( width, height, metalError ) )
+		{
+			_metalReady  = false;
+			_metalFailed = true;
+		}
+	}
+
+	if( useMetalPath() )
+	{
+		// Nothing to allocate: the plugin reads and writes MTLBuffers that share
+		// memory with the GL textures.
+	}
+	else if( useGLPath() )
 	{
 		// The plugin reads and writes textures, so the CPU frames would never be
 		// touched -- at 4K that is 66MB of allocation saved per instance.
@@ -210,8 +236,17 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 	return true;
 }
 
+bool OfxFFGLPlugin::useMetalPath() const
+{
+	return PluginContext::get().manifest.supportsMetalRender && _metalReady;
+}
+
 bool OfxFFGLPlugin::useGLPath() const
 {
+	// Metal wins when a plugin offers both.
+	if( PluginContext::get().manifest.supportsMetalRender && _metalReady )
+		return false;
+
 	// Both sides must agree. The host always offers it; the plugin usually does
 	// not, since Resolve -- which most OFX plugins target -- uses Metal or CUDA
 	// rather than the OFX OpenGL render path.
@@ -346,6 +381,57 @@ void OfxFFGLPlugin::ensureBlitTexture( int width, int height )
 	_texHeight = height;
 }
 
+bool OfxFFGLPlugin::renderViaMetal( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width,
+									int height )
+{
+	// 1. Copy the host's texture into the shared source surface. On-GPU; the
+	//    Metal buffer views the same memory, so this is the whole "upload".
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, _readFbo );
+	glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, in.Handle, 0 );
+	if( glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, _blitFbo );
+	glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, _metal.textureTarget(),
+							_metal.sourceTexture(), 0 );
+	if( glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+	glBlitFramebuffer( 0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+
+	// 2. Order the GL writes before Metal reads them.
+	_metal.flushGLWrites();
+
+	// 3. The plugin renders buffer -> buffer.
+	std::string error;
+	const bool ok = _effect->renderMetal( _metal.sourceBuffer(), _metal.outputBuffer(), _metal.rowBytes(),
+										  _metal.commandQueue(), width, height, _time, error );
+	if( !ok )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+
+	// 4. The plugin was entitled to return before its work finished.
+	_metal.waitForMetal();
+
+	// 5. Hand the output surface back to the host.
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, _blitFbo );
+	glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, _metal.textureTarget(),
+							_metal.outputTexture(), 0 );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, pGL->HostFBO );
+	glBlitFramebuffer( 0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+	glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+	return true;
+}
+
 bool OfxFFGLPlugin::renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height )
 {
 	ensureBlitTexture( width, height );
@@ -465,6 +551,20 @@ FFResult OfxFFGLPlugin::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		return FF_FAIL;
 
 	FrameTimer timer;
+
+	if( useMetalPath() )
+	{
+		applyParams();
+		if( !renderViaMetal( pGL, in, width, height ) )
+			return FF_FAIL;
+		if( timer.enabled )
+		{
+			timer.renderUs = timer.lap();
+			fprintf( stderr, "[timing] %dx%d  Metal render %8.1fus (no CPU round trip)\n", width, height,
+					 timer.renderUs );
+		}
+		return FF_SUCCESS;
+	}
 
 	if( useGLPath() )
 	{

@@ -107,24 +107,86 @@ It was still worth building: the negotiation, manifest plumbing, per-path clip
 handling and context lifecycle are all reused by Metal, which is the path that
 actually matters for Resolve plugins on macOS.
 
-## Next: Metal
+## What is implemented: Metal
 
-Metal passes `id<MTLBuffer>` — linear memory, not a texture — so the chain is:
+This is the path that matters for Resolve-targeted plugins on macOS, and it is
+now working.
+
+### The interop
+
+Metal passes `id<MTLBuffer>` — linear memory, not a texture — so something has to
+bridge Resolume's GL texture to a Metal buffer and back. **IOSurface** does it
+with no copy at all: one surface can back both a GL texture (via
+`CGLTexImageIOSurface2D`) and an `MTLBuffer` (via `newBufferWithBytesNoCopy` over
+its base address). Both views address the same physical memory, so on Apple
+Silicon's unified memory a GL blit into the surface is immediately visible to
+Metal.
+
+Per frame:
 
 ```
-Resolume GL texture
-  -> our IOSurface-backed GL texture   (on-GPU copy)
-  -> MTLTexture over the same IOSurface (zero copy)
-  -> MTLBuffer                          (blit encoder)
-  -> plugin renders
-  -> back the same way
+host GL texture --blit--> source IOSurface  (= source MTLBuffer)
+                                  |
+                          plugin's Metal kernel
+                                  |
+                          output IOSurface  (= output MTLBuffer)
+                --blit--> host framebuffer
 ```
 
-All on-GPU. The hard parts are GL/Metal synchronisation on the legacy macOS GL
-driver, and that HostSupport gives no help at all — it declares the Metal
-properties and implements none of the plumbing.
+Two on-GPU blits, no CPU copies. `source/ffgl/MetalBridge.mm`.
 
-**There is no Metal-capable OFX plugin to test against**, since the OpenFX
-examples are all CPU or GL. Writing a minimal one is the first step, both to
-de-risk the interop and to serve as the permanent test subject — exactly the role
-the OpenGL example plays now.
+### Things that bite
+
+- **`CGLTexImageIOSurface2D` accepts only `GL_TEXTURE_RECTANGLE`.** Not
+  `GL_TEXTURE_2D`. That is a macOS constraint, not a choice.
+- **IOSurface pads rows**, so `rowBytes` is generally not `width * 4`. A kernel
+  that assumes otherwise shears the image. The host reports the real value and
+  our test plugin honours it.
+- **Ordering is manual.** IOSurface gives coherency, not ordering. A `glFlush`
+  is needed after the GL blit before Metal reads, and the host must wait for the
+  plugin's Metal work before GL reads the output — the OFX contract explicitly
+  permits a plugin to return before its work completes.
+- **HostSupport gives no help.** It declares the Metal properties and implements
+  none of the plumbing, so `Effect::renderMetal` issues the render action itself
+  with `kOfxImageEffectPropMetalEnabled` and
+  `kOfxImageEffectPropMetalCommandQueue` set.
+
+### Measured
+
+Gain, on an M4 Max, pipelined (`ffgltest --bench 60`):
+
+| | CPU path | Metal path | |
+|---|---|---|---|
+| 1080p | 2.14 ms | **0.40 ms** | 5.4× |
+| 4K | 3.20 ms | **0.90 ms** | 3.6× |
+
+But the speed is the smaller half of the story. The larger half is that
+**GPU-only plugins can now run at all** — before this they did not render slowly,
+they refused to render.
+
+### Verified
+
+`ffgltest build/generated/Metal_Gain_Example.bundle 0=0.5` halves every channel
+including alpha (`128,128,128,255` → `64,64,64,127`); `0=2.0` saturates; the
+default of 1.0 is bit-exact identity, which rules out the blit-through case that
+would otherwise look like success. The demo image is visually identical to the
+CPU gain at the same setting, which also confirms channel order survives the
+BGRA IOSurface round trip — a uniform gain alone would hide a channel swap.
+
+## The test plugin
+
+`testplugins/metal-gain/` is ours, not vendored. It exists because no Metal OFX
+plugin is publicly available to test against: the OpenFX examples are all CPU or
+OpenGL, and the commercial plugins that do implement Metal are precisely the ones
+that refuse to load in an unrecognised host.
+
+It is deliberately **GPU-only** — it declares no CPU path and returns
+`kOfxStatErrImageFormat` if the host has not set
+`kOfxImageEffectPropMetalEnabled`. That makes it a faithful stand-in for the
+plugins this path is meant to unlock, and means a host that quietly falls back to
+CPU is caught rather than flattered.
+
+## Still missing
+
+CUDA and OpenCL. Those matter on Windows and Linux, where Resolve uses them
+instead of Metal — and where this project has never been compiled at all.

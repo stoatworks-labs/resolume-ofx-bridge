@@ -244,6 +244,7 @@ int main( int argc, char** argv )
 		printf( "  version    : %d.%d\n", p.versionMajor, p.versionMinor );
 		printf( "  bundle     : %s\n", p.bundlePath.c_str() );
 		printf( "  gl render  : %s\n", p.supportsOpenGLRender ? "yes" : "no" );
+		printf( "  metal      : %s\n", p.supportsMetalRender ? "yes" : "no" );
 		printf( "  contexts   : " );
 		for( const auto& c : p.contexts )
 			printf( "%s ", c.c_str() );

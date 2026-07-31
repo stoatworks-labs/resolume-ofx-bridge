@@ -128,6 +128,8 @@ bool Manifest::load( const std::string& path, Manifest& out, std::string& error 
 
 	if( const Json* v = root.find( "supportsOpenGLRender" ) )
 		out.supportsOpenGLRender = v->boolean();
+	if( const Json* v = root.find( "supportsMetalRender" ) )
+		out.supportsMetalRender = v->boolean();
 
 	if( out.identifier.empty() || out.bundlePath.empty() )
 	{

@@ -75,6 +75,23 @@ for ex in Invert Basic ChoiceParams Custom OpenGL; do
 	echo "  built $name.ofx.bundle"
 done
 
+# Our own Metal plugin. No publicly available OFX plugin implements Metal render
+# -- the OpenFX examples are all CPU or GL, and commercial Metal plugins refuse
+# to load in an unrecognised host -- so the Metal path would be untestable
+# without this. It is deliberately GPU-only: it refuses to render if the host
+# has not enabled Metal, so a host that silently falls back to CPU is caught.
+if [ "$(uname -s)" = "Darwin" ]; then
+	echo "==> building the Metal test plugin"
+	bdl="$OUT/metalgain.ofx.bundle/Contents/MacOS"
+	mkdir -p "$bdl"
+	clang++ -std=c++17 -ObjC++ -fobjc-arc -O2 -arch "$ARCH" -dynamiclib -fvisibility=hidden \
+		-I "$OFX/include" \
+		"$ROOT/testplugins/metal-gain/metalgain.mm" \
+		-framework Metal -framework Foundation \
+		-o "$bdl/metalgain.ofx"
+	echo "  built metalgain.ofx.bundle"
+fi
+
 echo
 echo "test plugins in: $OUT"
 echo "try: ./build/ofxprobe --dir $OUT"

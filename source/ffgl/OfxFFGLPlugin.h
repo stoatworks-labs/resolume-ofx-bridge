@@ -8,6 +8,7 @@
 //
 
 #include "Manifest.h"
+#include "MetalBridge.h"
 
 #include "FFGLSDK.h"
 
@@ -69,6 +70,15 @@ private:
 	/// crosses to the CPU.
 	bool useGLPath() const;
 
+	/// True when the plugin renders with Metal. Preferred over the GL path when
+	/// a plugin somehow offers both, because it is what Resolve-targeted plugins
+	/// actually implement.
+	bool useMetalPath() const;
+
+	/// Render through Metal: GL texture -> shared IOSurface -> MTLBuffer ->
+	/// plugin -> back, with no CPU round trip.
+	bool renderViaMetal( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
+
 	/// Render straight from `in` into our blit texture, with no CPU round trip.
 	bool renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
 
@@ -101,6 +111,10 @@ private:
 	int _effectHeight = 0;
 	bool _effectFailed = false;
 	bool _glContextAttached = false;
+
+	MetalBridge _metal;
+	bool _metalReady  = false;
+	bool _metalFailed = false;
 
 	double _time = 0.0;
 };
