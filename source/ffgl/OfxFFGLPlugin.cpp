@@ -5,6 +5,8 @@
 #include "Catalog.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 
 namespace ofxffgl {
@@ -338,6 +340,48 @@ bool OfxFFGLPlugin::uploadAndBlit( ProcessOpenGLStruct* pGL, int width, int heig
 	return true;
 }
 
+namespace {
+
+/// Per-stage timing, enabled with OFXBRIDGE_TIMING=1.
+///
+/// Exists to answer one question honestly: how much of a frame is the CPU round
+/// trip, and how much is the plugin's own work? Optimising the bridge is only
+/// worth it if the readback and upload dominate.
+struct FrameTimer
+{
+	using Clock = std::chrono::steady_clock;
+
+	bool enabled = false;
+	Clock::time_point mark;
+	double readbackUs = 0, renderUs = 0, uploadUs = 0;
+
+	FrameTimer()
+	{
+		const char* e = getenv( "OFXBRIDGE_TIMING" );
+		enabled       = e != nullptr && *e != '0';
+		mark          = Clock::now();
+	}
+
+	double lap()
+	{
+		const auto now = Clock::now();
+		const double us =
+			std::chrono::duration_cast< std::chrono::nanoseconds >( now - mark ).count() / 1000.0;
+		mark = now;
+		return us;
+	}
+
+	void report( int width, int height ) const
+	{
+		if( !enabled )
+			return;
+		fprintf( stderr, "[timing] %dx%d  readback %7.1fus  render %8.1fus  upload+blit %7.1fus  total %8.1fus\n",
+				 width, height, readbackUs, renderUs, uploadUs, readbackUs + renderUs + uploadUs );
+	}
+};
+
+} // namespace
+
 FFResult OfxFFGLPlugin::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 {
 	if( pGL == nullptr || pGL->numInputTextures < 1 || pGL->inputTextures[ 0 ] == nullptr )
@@ -354,18 +398,32 @@ FFResult OfxFFGLPlugin::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 	if( !ensureEffect( width, height ) )
 		return FF_FAIL;
 
+	FrameTimer timer;
+
 	if( !readbackTexture( in ) )
 		return FF_FAIL;
+	if( timer.enabled )
+		timer.readbackUs = timer.lap();
 
 	applyParams();
 
 	std::string error;
 	if( !_effect->render( *_input, *_output, _time, error ) )
 		return FF_FAIL;
+	if( timer.enabled )
+		timer.renderUs = timer.lap();
 
 	if( !uploadAndBlit( pGL, width, height ) )
 		return FF_FAIL;
+	if( timer.enabled )
+	{
+		// The blit is queued, not finished; without this the upload cost lands on
+		// whatever call next forces a flush.
+		glFinish();
+		timer.uploadUs = timer.lap();
+	}
 
+	timer.report( width, height );
 	return FF_SUCCESS;
 }
 

@@ -28,6 +28,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
 #include <dlfcn.h>
 #include <filesystem>
@@ -225,9 +226,23 @@ int main( int argc, char** argv )
 	}
 
 	std::string demoPath;
+	int benchFrames = 0;
 	for( int i = 2; i < argc; ++i )
-		if( std::string( argv[ i ] ) == "--demo" && i + 1 < argc )
+	{
+		const std::string a = argv[ i ];
+		if( a == "--demo" && i + 1 < argc )
 			demoPath = argv[ i + 1 ];
+		else if( a == "--bench" && i + 1 < argc )
+			benchFrames = atoi( argv[ i + 1 ] );
+		else if( a == "--size" && i + 1 < argc )
+		{
+			if( sscanf( argv[ i + 1 ], "%dx%d", &gWidth, &gHeight ) != 2 )
+			{
+				fprintf( stderr, "--size expects WxH\n" );
+				return 2;
+			}
+		}
+	}
 
 	if( !demoPath.empty() )
 	{
@@ -355,6 +370,28 @@ int main( int argc, char** argv )
 		return 1;
 	}
 	printf( "ProcessOpenGL ok\n" );
+
+	if( benchFrames > 0 )
+	{
+		// Warm up first: the initial frame builds the OFX instance and allocates
+		// the buffers, which is not what we are trying to measure.
+		using Clock = std::chrono::steady_clock;
+		plugMain( FF_PROCESS_OPENGL, pglArg, instance );
+		glFinish();
+
+		const auto t0 = Clock::now();
+		for( int i = 0; i < benchFrames; ++i )
+			plugMain( FF_PROCESS_OPENGL, pglArg, instance );
+		glFinish();
+		const double totalMs =
+			std::chrono::duration_cast< std::chrono::microseconds >( Clock::now() - t0 ).count() / 1000.0;
+
+		const double perFrame = totalMs / benchFrames;
+		printf( "\nbenchmark: %d frames at %dx%d\n", benchFrames, gWidth, gHeight );
+		printf( "  %.2f ms/frame  (%.1f fps)\n", perFrame, 1000.0 / perFrame );
+		printf( "  budget at 60fps is 16.67 ms -- this effect uses %.0f%% of it\n",
+				perFrame / 16.67 * 100.0 );
+	}
 
 	// Read the result back out of the host FBO.
 	std::vector< uint8_t > outPixels( (size_t)gWidth * gHeight * 4 );
