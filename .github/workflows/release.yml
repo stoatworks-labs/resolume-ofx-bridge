@@ -1,0 +1,86 @@
+name: release
+
+# Build the OFX bridge tools and the FFGL wrapper template.
+#
+# macOS only for this release. The Windows and Linux code paths exist but have
+# never been compiled or run, and shipping a binary nobody has executed would
+# misrepresent the project's status — see docs/03-verification.md. They go in
+# once they have actually been built and tried.
+#
+# macos-14 is arm64 and cross-compiles the x86_64 slice; the Intel macOS runners
+# are retired, so never target macos-13.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: macos-universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build
+        run: cmake --build build -j3
+
+      - name: Verify the binaries are actually universal
+        # A "universal" build that quietly produced one slice is the classic
+        # CMake failure here, and the build log looks identical either way.
+        run: |
+          set -euo pipefail
+          for f in build/ofxgen build/ofxprobe build/ofxwrapper.bundle/Contents/MacOS/ofxwrapper; do
+            archs=$(lipo -archs "$f")
+            echo "$f: $archs"
+            case "$archs" in
+              *arm64*) ;;
+              *) echo "::error::$f is missing the arm64 slice"; exit 1 ;;
+            esac
+            case "$archs" in
+              *x86_64*) ;;
+              *) echo "::error::$f is missing the x86_64 slice"; exit 1 ;;
+            esac
+          done
+
+      - name: Self-test against real OFX plugins
+        # Builds a corpus from the OpenFX examples and runs the bridge end to end,
+        # so a release cannot ship a binary that fails its own harness.
+        run: |
+          set -euo pipefail
+          ./scripts/build-test-plugins.sh
+          ./build/ofxprobe --dir build/test-plugins
+          ./build/ofxprobe --dir build/test-plugins \
+            --render uk.co.thefoundry.OfxInvertExample
+          ./build/ofxgen generate --dir build/test-plugins --out build/generated
+          ./build/ofxgen verify build/generated/OFX_Gain_Example.bundle
+
+      - name: Stage the release archive
+        run: |
+          set -euo pipefail
+          mkdir -p dist/resolume-ofx-bridge
+          cp -R build/ofxwrapper.bundle dist/resolume-ofx-bridge/
+          cp build/ofxgen build/ofxprobe dist/resolume-ofx-bridge/
+          cp README.md CHANGELOG.md LICENSE dist/resolume-ofx-bridge/
+          cp -R docs dist/resolume-ofx-bridge/docs
+          cd dist && zip -r resolume-ofx-bridge-macos-universal.zip resolume-ofx-bridge
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/resolume-ofx-bridge-macos-universal.zip
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/resolume-ofx-bridge-macos-universal.zip
+          fail_on_unmatched_files: true

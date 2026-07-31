@@ -11,7 +11,11 @@
 // contents, and checks what comes back — the same sequence Resolume performs,
 // minus Resolume.
 //
-//   ffgltest <bundle> [param=value]...
+//   ffgltest <bundle> [param=value]... [--demo out.bmp]
+//
+// --demo runs a larger colour test pattern through the effect and writes a
+// side-by-side before/after image, so the documentation shows real plugin
+// output rather than a mock-up.
 //
 // Unlike ofxgen, this links the FFGL SDK so the function codes and structs come
 // from the headers rather than being duplicated.
@@ -36,8 +40,10 @@ namespace {
 
 using PlugMainFn = FFMixed ( * )( FFUInt32, FFMixed, FFInstanceID );
 
-constexpr int kWidth  = 64;
-constexpr int kHeight = 32;
+// Small by default (fast, and a wrong stride is obvious); --demo uses a 16:9
+// frame big enough to look at.
+int gWidth  = 64;
+int gHeight = 32;
 
 CGLContextObj createContext()
 {
@@ -86,18 +92,126 @@ std::string findBinary( const std::string& bundlePath )
 
 void fillRamp( std::vector< uint8_t >& px )
 {
-	px.resize( (size_t)kWidth * kHeight * 4 );
-	for( int y = 0; y < kHeight; ++y )
+	px.resize( (size_t)gWidth * gHeight * 4 );
+	for( int y = 0; y < gHeight; ++y )
 	{
-		for( int x = 0; x < kWidth; ++x )
+		for( int x = 0; x < gWidth; ++x )
 		{
-			uint8_t* p = px.data() + ( (size_t)y * kWidth + x ) * 4;
+			uint8_t* p = px.data() + ( (size_t)y * gWidth + x ) * 4;
 			p[ 0 ]     = (uint8_t)( x * 4 );
 			p[ 1 ]     = (uint8_t)( y * 8 );
 			p[ 2 ]     = 128;
 			p[ 3 ]     = 255;
 		}
 	}
+}
+
+/// A colour pattern for the demo image: saturated bars over a luminance ramp,
+/// with a grey wedge along the bottom. Chosen so that gain, inversion and
+/// per-channel effects are all visibly distinguishable.
+void fillPattern( std::vector< uint8_t >& px )
+{
+	px.resize( (size_t)gWidth * gHeight * 4 );
+	static const uint8_t bars[ 8 ][ 3 ] = {
+		{ 255, 255, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 255, 0 },
+		{ 255, 0, 255 },   { 255, 0, 0 },   { 0, 0, 255 },   { 32, 32, 32 }
+	};
+
+	for( int y = 0; y < gHeight; ++y )
+	{
+		for( int x = 0; x < gWidth; ++x )
+		{
+			uint8_t* p = px.data() + ( (size_t)y * gWidth + x ) * 4;
+
+			if( y > gHeight * 3 / 4 )
+			{
+				// Grey wedge: makes a gain change obvious as a shift in where it
+				// clips, not just an overall brightness change.
+				const uint8_t v = (uint8_t)( 255 * x / ( gWidth - 1 ) );
+				p[ 0 ] = p[ 1 ] = p[ 2 ] = v;
+			}
+			else
+			{
+				const int bar   = ( x * 8 ) / gWidth;
+				const float fade = 0.35f + 0.65f * ( 1.0f - (float)y / ( gHeight * 3 / 4 ) );
+				p[ 0 ] = (uint8_t)( bars[ bar ][ 0 ] * fade );
+				p[ 1 ] = (uint8_t)( bars[ bar ][ 1 ] * fade );
+				p[ 2 ] = (uint8_t)( bars[ bar ][ 2 ] * fade );
+			}
+			p[ 3 ] = 255;
+		}
+	}
+}
+
+void put32( std::vector< uint8_t >& v, uint32_t x )
+{
+	v.push_back( (uint8_t)( x & 0xFF ) );
+	v.push_back( (uint8_t)( ( x >> 8 ) & 0xFF ) );
+	v.push_back( (uint8_t)( ( x >> 16 ) & 0xFF ) );
+	v.push_back( (uint8_t)( ( x >> 24 ) & 0xFF ) );
+}
+
+/// Write `left` and `right` side by side as a 24-bit BMP.
+///
+/// BMP because it needs no libraries and macOS `sips` converts it to PNG; both
+/// buffers are RGBA top-down, and BMP rows are bottom-up BGR.
+bool writeComparisonBmp( const std::string& path,
+						 const std::vector< uint8_t >& left,
+						 const std::vector< uint8_t >& right )
+{
+	const int gap   = 8;
+	const int outW  = gWidth * 2 + gap;
+	const int outH  = gHeight;
+	const int stride = ( outW * 3 + 3 ) & ~3;
+
+	std::vector< uint8_t > pixels( (size_t)stride * outH, 24 );
+
+	for( int y = 0; y < outH; ++y )
+	{
+		uint8_t* row = pixels.data() + (size_t)( outH - 1 - y ) * stride;
+		for( int x = 0; x < gWidth; ++x )
+		{
+			const uint8_t* l = left.data() + ( (size_t)y * gWidth + x ) * 4;
+			uint8_t* d       = row + (size_t)x * 3;
+			d[ 0 ] = l[ 2 ];
+			d[ 1 ] = l[ 1 ];
+			d[ 2 ] = l[ 0 ];
+
+			const uint8_t* r = right.data() + ( (size_t)y * gWidth + x ) * 4;
+			uint8_t* d2      = row + (size_t)( x + gWidth + gap ) * 3;
+			d2[ 0 ] = r[ 2 ];
+			d2[ 1 ] = r[ 1 ];
+			d2[ 2 ] = r[ 0 ];
+		}
+	}
+
+	std::vector< uint8_t > header;
+	header.push_back( 'B' );
+	header.push_back( 'M' );
+	put32( header, (uint32_t)( 14 + 40 + pixels.size() ) );
+	put32( header, 0 );
+	put32( header, 14 + 40 );
+	put32( header, 40 );
+	put32( header, (uint32_t)outW );
+	put32( header, (uint32_t)outH );
+	header.push_back( 1 );
+	header.push_back( 0 );// planes
+	header.push_back( 24 );
+	header.push_back( 0 );// bpp
+	put32( header, 0 );   // BI_RGB
+	put32( header, (uint32_t)pixels.size() );
+	put32( header, 2835 );
+	put32( header, 2835 );
+	put32( header, 0 );
+	put32( header, 0 );
+
+	FILE* f = fopen( path.c_str(), "wb" );
+	if( f == nullptr )
+		return false;
+	fwrite( header.data(), 1, header.size(), f );
+	fwrite( pixels.data(), 1, pixels.size(), f );
+	fclose( f );
+	return true;
 }
 
 } // namespace
@@ -108,6 +222,17 @@ int main( int argc, char** argv )
 	{
 		fprintf( stderr, "usage: ffgltest <bundle> [paramIndex=value]...\n" );
 		return 2;
+	}
+
+	std::string demoPath;
+	for( int i = 2; i < argc; ++i )
+		if( std::string( argv[ i ] ) == "--demo" && i + 1 < argc )
+			demoPath = argv[ i + 1 ];
+
+	if( !demoPath.empty() )
+	{
+		gWidth  = 480;
+		gHeight = 270;
 	}
 
 	const std::string binary = findBinary( argv[ 1 ] );
@@ -142,12 +267,15 @@ int main( int argc, char** argv )
 
 	// Input texture with a known ramp.
 	std::vector< uint8_t > inPixels;
-	fillRamp( inPixels );
+	if( demoPath.empty() )
+		fillRamp( inPixels );
+	else
+		fillPattern( inPixels );
 
 	GLuint inTex = 0;
 	glGenTextures( 1, &inTex );
 	glBindTexture( GL_TEXTURE_2D, inTex );
-	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, kWidth, kHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, inPixels.data() );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, gWidth, gHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, inPixels.data() );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	glBindTexture( GL_TEXTURE_2D, 0 );
@@ -156,7 +284,7 @@ int main( int argc, char** argv )
 	GLuint outTex = 0;
 	glGenTextures( 1, &outTex );
 	glBindTexture( GL_TEXTURE_2D, outTex );
-	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, kWidth, kHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, gWidth, gHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 	glBindTexture( GL_TEXTURE_2D, 0 );
@@ -172,7 +300,7 @@ int main( int argc, char** argv )
 	}
 
 	// Instantiate.
-	FFGLViewportStruct viewport{ 0, 0, kWidth, kHeight };
+	FFGLViewportStruct viewport{ 0, 0, (GLuint)gWidth, (GLuint)gHeight };
 	FFMixed instArg;
 	instArg.PointerValue = &viewport;
 	FFMixed instResult   = plugMain( FF_INSTANTIATE_GL, instArg, nullptr );
@@ -190,7 +318,7 @@ int main( int argc, char** argv )
 		const std::string kv = argv[ i ];
 		const size_t eq      = kv.find( '=' );
 		if( eq == std::string::npos )
-			continue;
+			continue;// --demo and its argument
 		SetParameterStruct sp{};
 		sp.ParameterNumber = (FFUInt32)atoi( kv.substr( 0, eq ).c_str() );
 		const float value  = (float)atof( kv.c_str() + eq + 1 );
@@ -203,10 +331,10 @@ int main( int argc, char** argv )
 
 	// Render.
 	FFGLTextureStruct inStruct{};
-	inStruct.Width          = kWidth;
-	inStruct.Height         = kHeight;
-	inStruct.HardwareWidth  = kWidth;
-	inStruct.HardwareHeight = kHeight;
+	inStruct.Width          = gWidth;
+	inStruct.Height         = gHeight;
+	inStruct.HardwareWidth  = gWidth;
+	inStruct.HardwareHeight = gHeight;
 	inStruct.Handle         = inTex;
 
 	FFGLTextureStruct* textures[ 1 ] = { &inStruct };
@@ -216,7 +344,7 @@ int main( int argc, char** argv )
 	pgl.HostFBO          = hostFbo;
 
 	glBindFramebuffer( GL_FRAMEBUFFER, hostFbo );
-	glViewport( 0, 0, kWidth, kHeight );
+	glViewport( 0, 0, gWidth, gHeight );
 
 	FFMixed pglArg;
 	pglArg.PointerValue = &pgl;
@@ -229,16 +357,16 @@ int main( int argc, char** argv )
 	printf( "ProcessOpenGL ok\n" );
 
 	// Read the result back out of the host FBO.
-	std::vector< uint8_t > outPixels( (size_t)kWidth * kHeight * 4 );
+	std::vector< uint8_t > outPixels( (size_t)gWidth * gHeight * 4 );
 	glBindFramebuffer( GL_READ_FRAMEBUFFER, hostFbo );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
-	glReadPixels( 0, 0, kWidth, kHeight, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.data() );
+	glReadPixels( 0, 0, gWidth, gHeight, GL_RGBA, GL_UNSIGNED_BYTE, outPixels.data() );
 
 	const GLenum glErr = glGetError();
 	if( glErr != GL_NO_ERROR )
 		fprintf( stderr, "GL error 0x%04x after readback\n", glErr );
 
-	const size_t mid = ( (size_t)( kHeight / 2 ) * kWidth + ( kWidth / 2 ) ) * 4;
+	const size_t mid = ( (size_t)( gHeight / 2 ) * gWidth + ( gWidth / 2 ) ) * 4;
 	printf( "  in  [0,0]    RGBA %3u %3u %3u %3u\n", inPixels[ 0 ], inPixels[ 1 ], inPixels[ 2 ], inPixels[ 3 ] );
 	printf( "  out [0,0]    RGBA %3u %3u %3u %3u\n", outPixels[ 0 ], outPixels[ 1 ], outPixels[ 2 ], outPixels[ 3 ] );
 	printf( "  in  [centre] RGBA %3u %3u %3u %3u\n", inPixels[ mid ], inPixels[ mid + 1 ], inPixels[ mid + 2 ],
@@ -251,6 +379,14 @@ int main( int argc, char** argv )
 		if( outPixels[ i ] != inPixels[ i ] )
 			++changed;
 	printf( "  %zu of %zu bytes differ from the input\n", changed, outPixels.size() );
+
+	if( !demoPath.empty() )
+	{
+		if( writeComparisonBmp( demoPath, inPixels, outPixels ) )
+			printf( "wrote %s (%dx%d, before | after)\n", demoPath.c_str(), gWidth * 2 + 8, gHeight );
+		else
+			fprintf( stderr, "could not write %s\n", demoPath.c_str() );
+	}
 
 	plugMain( FF_DEINSTANTIATE_GL, zero, instance );
 	CGLSetCurrentContext( nullptr );
