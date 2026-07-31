@@ -56,7 +56,9 @@ mkdir -p "$OUT"
 # Basic        - doubles with display ranges, a boolean, a group and a page
 # ChoiceParams - choice parameters with named options
 # Custom       - General context only; exercises our "cannot host this" path
-for ex in Invert Basic ChoiceParams Custom; do
+# OpenGL       - implements OFX OpenGL render; the only test subject for the
+#                GPU path, since none of the others can avoid the CPU round trip
+for ex in Invert Basic ChoiceParams Custom OpenGL; do
 	src="$(ls "$OFX/Examples/$ex/"*.cpp 2>/dev/null | head -1 || true)"
 	[ -n "$src" ] || { echo "  skip $ex (no source)"; continue; }
 

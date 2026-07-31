@@ -2,6 +2,7 @@
 #include "Params.h"
 
 #include "ofxImageEffect.h"
+#include "ofxGPURender.h"
 #include "ofxProgress.h"
 #include "ofxTimeLine.h"
 
@@ -157,6 +158,47 @@ OfxRectD Clip::getRegionOfDefinition( OfxTime /*time*/ ) const
 {
 	OfxRectD r = { 0.0, 0.0, (double)_effect->frameWidth(), (double)_effect->frameHeight() };
 	return r;
+}
+
+OFX::Host::ImageEffect::Texture* Clip::loadTexture( OfxTime /*time*/, const char* /*format*/,
+													const OfxRectD* /*optionalBounds*/ )
+{
+	// Only meaningful while the FFGL layer has bound a texture for this pass.
+	// ofxprobe links this host with no GL context at all, so a null here is the
+	// normal headless answer rather than an error.
+	if( _textureName == 0 )
+		return nullptr;
+
+	auto* tex = new OFX::Host::ImageEffect::Texture( *this );
+
+	tex->setStringProperty( kOfxPropType, kOfxTypeImage );
+	tex->setStringProperty( kOfxImageEffectPropPixelDepth, kOfxBitDepthByte );
+	tex->setStringProperty( kOfxImageEffectPropComponents, kOfxImageComponentRGBA );
+	tex->setStringProperty( kOfxImageEffectPropPreMultiplication, getPremult() );
+	tex->setStringProperty( kOfxImagePropField, kOfxImageFieldNone );
+	tex->setStringProperty( kOfxImagePropUniqueIdentifier, "ofxbridge-texture" );
+
+	// The whole point of this path: the plugin gets the GL texture name, and no
+	// pixel ever leaves the GPU.
+	tex->setIntProperty( kOfxImageEffectPropOpenGLTextureIndex, (int)_textureName );
+	tex->setIntProperty( kOfxImageEffectPropOpenGLTextureTarget, (int)_textureTarget );
+
+	tex->setDoubleProperty( kOfxImageEffectPropRenderScale, 1.0, 0 );
+	tex->setDoubleProperty( kOfxImageEffectPropRenderScale, 1.0, 1 );
+	tex->setDoubleProperty( kOfxImagePropPixelAspectRatio, 1.0 );
+
+	// No CPU mapping exists for a texture.
+	tex->setPointerProperty( kOfxImagePropData, nullptr );
+	tex->setIntProperty( kOfxImagePropRowBytes, 0 );
+
+	const OfxRectI bounds = { 0, 0, _textureWidth, _textureHeight };
+	for( int i = 0; i < 4; ++i )
+	{
+		const int v = ( &bounds.x1 )[ i ];
+		tex->setIntProperty( kOfxImagePropBounds, v, i );
+		tex->setIntProperty( kOfxImagePropRegionOfDefinition, v, i );
+	}
+	return tex;
 }
 
 OFX::Host::ImageEffect::Image* Clip::getImage( OfxTime /*time*/, const OfxRectD* /*optionalBounds*/ )
@@ -440,6 +482,12 @@ Host::Host()
 	_properties.setStringProperty( kOfxImageEffectPropSupportedPixelDepths, kOfxBitDepthFloat, 0 );
 	_properties.setStringProperty( kOfxImageEffectPropSupportedPixelDepths, kOfxBitDepthByte, 1 );
 
+	// Advertise the OFX OpenGL render path. A plugin that also advertises it can
+	// be handed our GL texture directly, skipping the CPU round trip entirely.
+	// Plugins that don't (which is most Resolve-targeted ones, since Resolve uses
+	// Metal/CUDA rather than this) simply fall back to the CPU path.
+	_properties.setStringProperty( kOfxImageEffectPropOpenGLRenderSupported, "true" );
+
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipDepths, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipPARs, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSetableFrameRate, 0 );
@@ -601,6 +649,13 @@ OfxStatus Host::mutexUnLock( const OfxMutexHandle mutex )
 OfxStatus Host::mutexTryLock( const OfxMutexHandle mutex )
 {
 	return ( (std::recursive_mutex*)mutex )->try_lock() ? kOfxStatOK : kOfxStatFailed;
+}
+
+OfxStatus Host::flushOpenGLResources() const
+{
+	// We allocate no GL resources on the plugin's behalf; the FFGL layer owns
+	// everything and frees it in DeInitGL.
+	return kOfxStatOK;
 }
 
 } // namespace ofxbridge

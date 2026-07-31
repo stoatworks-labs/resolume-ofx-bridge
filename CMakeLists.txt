@@ -44,6 +44,14 @@ if( APPLE )
 	target_compile_definitions( ofxhostsupport PUBLIC OFX_SUPPORTS_MULTITHREAD )
 endif()
 
+# Enables HostSupport's OFX OpenGL render path: the kOfxOpenGLRenderSuite, the
+# Texture class, and the contextAttached/Detached actions. A plugin that
+# implements OpenGL render can then be handed our GL texture directly instead of
+# going through a CPU round trip.
+#
+# PUBLIC because it changes which virtuals our own Host/Clip must implement.
+target_compile_definitions( ofxhostsupport PUBLIC OFX_SUPPORTS_OPENGLRENDER )
+
 # HostSupport is third-party; don't let its warnings drown ours.
 target_compile_options( ofxhostsupport PRIVATE -w )
 

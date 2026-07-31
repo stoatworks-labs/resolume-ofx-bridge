@@ -86,6 +86,8 @@ public:
 	bool getContinuousSamples() const override;
 
 	OFX::Host::ImageEffect::Image* getImage( OfxTime time, const OfxRectD* optionalBounds ) override;
+	OFX::Host::ImageEffect::Texture* loadTexture( OfxTime time, const char* format,
+												  const OfxRectD* optionalBounds ) override;
 	OfxRectD getRegionOfDefinition( OfxTime time ) const override;
 
 	/// Point this clip at a caller-owned frame for the duration of one render.
@@ -94,10 +96,31 @@ public:
 		_frame = frame;
 	}
 
+	/// Point this clip at an OpenGL texture for the duration of one render.
+	///
+	/// Taken as a plain unsigned so this header stays free of GL headers —
+	/// ofxprobe links the host and runs with no GL context at all.
+	void setTexture( unsigned int name, unsigned int target, int width, int height )
+	{
+		_textureName   = name;
+		_textureTarget = target;
+		_textureWidth  = width;
+		_textureHeight = height;
+	}
+	void clearTexture()
+	{
+		_textureName = 0;
+	}
+
 private:
 	Effect* _effect;
 	Frame* _frame = nullptr;
 	bool _isOutput;
+
+	unsigned int _textureName   = 0;
+	unsigned int _textureTarget = 0;
+	int _textureWidth           = 0;
+	int _textureHeight          = 0;
 };
 
 /// A live instance of an OFX effect, in the "Filter" context.
@@ -221,6 +244,8 @@ public:
 	OfxStatus mutexLock( const OfxMutexHandle mutex ) override;
 	OfxStatus mutexUnLock( const OfxMutexHandle mutex ) override;
 	OfxStatus mutexTryLock( const OfxMutexHandle mutex ) override;
+
+	OfxStatus flushOpenGLResources() const override;
 };
 
 } // namespace ofxbridge
