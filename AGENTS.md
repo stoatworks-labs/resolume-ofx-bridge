@@ -91,6 +91,20 @@ system. Users do not need Xcode/MSVC.
 - **`CFFGLPlugin::InitGL` dereferences its viewport argument unconditionally**
   (`FFGLPluginSDK.h:59`, `currentViewport = *vp`). Passing null traps.
 
+### OpenGL render path
+
+- **HostSupport's `renderAction` cannot set `kOfxImageEffectPropOpenGLEnabled`.**
+  `Effect::renderGL` reissues the action itself, mirroring
+  `Instance::renderAction` (`ofxhImageEffect.cpp:918`) with that property added.
+  Without it a GL-capable plugin takes its CPU branch, or refuses outright.
+- **The OFX GL contract is "draw into whatever is bound".** The plugin fetches
+  the output texture id for reference but renders into the current framebuffer,
+  so the host must bind it and set the viewport before the render action.
+- **Immediate-mode GL plugins cannot work in Resolume.** Resolume uses a core
+  profile (FFGL 2.x shaders are `#version 410 core`) and macOS has no
+  compatibility profile above 2.1. `ffgltest --legacy-gl` exists only to test
+  such plugins; it is not how Resolume runs.
+
 ### Known limitation
 
 `createEffect` loads every OFX bundle in the target bundle's directory, because

@@ -25,6 +25,7 @@ So the corpus is built from the OpenFX project's example plugins:
 | `Basic` (Gain) | doubles with display ranges, a boolean, a group, a page |
 | `ChoiceParams` | choice parameters with named options |
 | `Custom` | General context only — exercises the "cannot host this" path |
+| `OpenGL` | implements OFX OpenGL render — the only test subject for the GPU path |
 
 ## Level 1 — introspection
 
@@ -104,6 +105,37 @@ which confirms empirically that no vertical flip is introduced: OFX's bottom-up
 image convention and FFGL's bottom-left texture origin agree, so the code applies
 no correction.
 
+## Level 5 — the OpenGL render path
+
+```bash
+./build/ffgltest build/generated/OFX_OpenGL_Example.bundle --legacy-gl
+```
+
+Verified: the plugin advertises OFX OpenGL render, the manifest records it, the
+wrapper takes the GL path, `clipLoadTexture` returns valid texture ids and
+targets for both the source and output clips, and the plugin's drawing lands in
+the host framebuffer — with no pixel crossing to the CPU.
+
+`--legacy-gl` is required *for this plugin*, not by the path: the OpenFX example
+draws with immediate mode, which is illegal in the core profile Resolume uses.
+In a 4.1 core context the same code produces `GL_INVALID_OPERATION` and a black
+frame. See [04-gpu-acceleration.md](04-gpu-acceleration.md).
+
+There is **no core-profile OFX GL plugin to test against**, so the path is proven
+against an immediate-mode plugin in a legacy context, and unproven in the profile
+Resolume actually runs.
+
+## Performance
+
+```bash
+./build/ffgltest <bundle> --size 3840x2160 --bench 60
+OFXBRIDGE_TIMING=1 ./build/ffgltest <bundle> --size 1920x1080
+```
+
+Measured on an M4 Max with the Gain example: 2.25 ms/frame at 1080p, 2.94 ms at
+4K, pipelined. The transfer costs ~2.2 ms at both resolutions — latency-bound
+rather than bandwidth-bound, because memory is unified.
+
 ## What is *not* verified
 
 - **Nothing has run inside Resolume.** Every GL test uses our own offscreen
@@ -116,8 +148,11 @@ no correction.
 - **No commercial plugin has been tried**, only the OpenFX examples. Real-world
   plugins are larger, more likely to be GPU-only, and more likely to refuse an
   unrecognised host.
-- **No performance measurement.** The per-frame GPU→CPU→GPU round trip is
-  expected to be the bottleneck, but nobody has profiled it.
+- **The GL path in a core profile.** Proven only under `--legacy-gl`, because the
+  one available GL-render plugin uses immediate mode.
+- **A residual `GL_INVALID_OPERATION` in the legacy path**, most likely our own
+  FBO calls wanting the `EXT` entry points under GL 2.1. It does not affect the
+  core-profile path that ships.
 - **Windows and Linux are untried.** The code paths exist; `ffgltest` is
   macOS-only, as it creates its context with CGL directly.
 - **No sustained run.** Nothing has been left running long enough to surface a

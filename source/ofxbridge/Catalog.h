@@ -67,6 +67,11 @@ struct PluginDesc
 	std::vector< std::string > contexts;
 	bool supportsFilter = false;
 
+	/// True if the plugin advertises OFX OpenGL render. When it does, and the
+	/// host agrees, the wrapper hands over GL textures and no pixel crosses to
+	/// the CPU.
+	bool supportsOpenGLRender = false;
+
 	std::vector< ParamDesc > params;
 
 	/// Non-empty if describe failed; the plugin is then unusable.

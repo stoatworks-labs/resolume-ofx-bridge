@@ -29,11 +29,18 @@ A clean machine has no OFX plugins, even with Resolve installed. Build some:
 ./build/ffgltest build/generated/<Name>.bundle --demo out.bmp     # demo image
 ```
 
-`OFXBRIDGE_DEBUG=1` makes the host log each parameter instance it creates.
+`OFXBRIDGE_DEBUG=1` logs each parameter instance the host creates.
+`OFXBRIDGE_TIMING=1` reports per-stage frame timing.
+
+```bash
+./build/ffgltest <bundle> --size 3840x2160 --bench 60   # measure
+./build/ffgltest <bundle> --legacy-gl                   # immediate-mode GL plugins
+```
 
 ## Release
 
-Tag-triggered; `.github/workflows/release.yml` builds macOS and Windows.
+Tag-triggered; `.github/workflows/release.yml` builds macOS universal only
+(Windows/Linux paths exist but have never been compiled).
 
 ```bash
 git tag -a v0.1.0 -m "..." && git push origin v0.1.0

@@ -45,6 +45,8 @@ struct Manifest
 	int versionMinor = 0;
 	std::string bundlePath;
 	int indexInBundle = 0;
+	/// Whether the plugin can take the GL texture path.
+	bool supportsOpenGLRender = false;
 	std::vector< ManifestParam > params;
 
 	static bool load( const std::string& path, Manifest& out, std::string& error );

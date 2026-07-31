@@ -145,16 +145,23 @@ ranges survive intact.
 | `ofxgen list` | show what was found, and why anything was skipped |
 | `ofxgen verify` | load a generated bundle as a host would and print what it advertises |
 | `ofxprobe` | dump a plugin's parameters; `--render` pushes a frame through it on the CPU |
-| `ffgltest` | drive a generated bundle through a real OpenGL context |
+| `ffgltest` | drive a generated bundle through a real OpenGL context; `--bench` to time it |
 
 ## Compatibility and limits
 
 - **Only the Filter context** is hosted, since that is what maps onto an effect
   slot in a Resolume clip. Generator, Transition and General-only plugins are
   reported and skipped.
-- **CPU rendering only.** Each frame makes a full texture round trip
-  (GPU → CPU → GPU). Fine at 1080p; 4K will hurt. The OFX GPU render extensions
-  (Metal/CUDA/OpenCL) are not implemented.
+- **Mostly CPU rendering.** A plugin advertising OFX *OpenGL render* gets the GL
+  texture directly with no CPU round trip; everything else takes the CPU path, a
+  full GPU → CPU → GPU trip per frame. Measured at 2.25 ms/frame at 1080p and
+  2.94 ms at 4K on an M4 Max — see
+  [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md). The Metal, CUDA and
+  OpenCL render extensions are **not** implemented, which means GPU-only plugins
+  (common among Resolve-targeted ones) will not load at all.
+- **OpenGL-render plugins must use core-profile GL** to work in Resolume.
+  Immediate-mode drawing is illegal in a core profile and macOS has no
+  compatibility profile above 2.1.
 - **Licensed plugins will mostly refuse to load.** The bridge identifies itself
   honestly as its own host, and many commercial OFX plugins only license
   themselves to hosts they recognise. That is the vendor's decision and is not
@@ -170,6 +177,8 @@ ranges survive intact.
   parameter type becomes FFGL parameters
 - [docs/03-verification.md](docs/03-verification.md) — what is actually tested,
   and what is not
+- [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md) — where a frame
+  actually goes, and which GPU paths exist
 - [AGENTS.md](AGENTS.md) — onboarding, invariants and the traps found along the way
 
 ## Licence

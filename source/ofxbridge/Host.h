@@ -141,6 +141,24 @@ public:
 	/// same size. Returns false on a plugin-reported failure.
 	bool render( Frame& in, Frame& out, double time, std::string& error );
 
+	/// True if this plugin advertises OFX OpenGL render, so it can read and write
+	/// GL textures directly and no pixel need cross to the CPU.
+	bool supportsOpenGLRender() const;
+
+	/// Render via OFX OpenGL render.
+	///
+	/// The caller must have a current GL context, and must have bound a
+	/// framebuffer whose colour attachment is `outputTexture` — the OFX GL
+	/// contract is that the plugin draws into whatever is currently bound, and
+	/// merely *reads* the output texture id for reference.
+	bool renderGL( unsigned int inputTexture, unsigned int outputTexture, unsigned int target,
+				   int width, int height, double time, std::string& error );
+
+	/// Tell the plugin a GL context has become available (or gone away). Must be
+	/// called with the context current.
+	bool attachGLContext( std::string& error );
+	void detachGLContext();
+
 	// -- Instance interface -----------------------------------------------------
 	OFX::Host::ImageEffect::ClipInstance* newClipInstance( OFX::Host::ImageEffect::Instance* effect,
 														   OFX::Host::ImageEffect::ClipDescriptor* descriptor,

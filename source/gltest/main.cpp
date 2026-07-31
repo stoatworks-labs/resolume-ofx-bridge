@@ -46,12 +46,18 @@ using PlugMainFn = FFMixed ( * )( FFUInt32, FFMixed, FFInstanceID );
 int gWidth  = 64;
 int gHeight = 32;
 
-CGLContextObj createContext()
+/// Create a context.
+///
+/// 4.1 core is what Resolume uses on macOS, so that is the default. The legacy
+/// 2.1 profile exists only for testing OFX OpenGL-render plugins that draw with
+/// immediate mode (glBegin/glVertex), which is illegal in a core profile — see
+/// docs/04-gpu-acceleration.md. macOS offers no compatibility profile above 2.1,
+/// so this really is either/or.
+CGLContextObj createContext( bool legacy )
 {
-	// 4.1 core is what Resolume uses on macOS, so match it rather than asking for
-	// the oldest thing that would work.
 	CGLPixelFormatAttribute attrs[] = {
-		kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core,
+		kCGLPFAOpenGLProfile,
+		(CGLPixelFormatAttribute)( legacy ? kCGLOGLPVersion_Legacy : kCGLOGLPVersion_GL4_Core ),
 		kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
 		kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
 		(CGLPixelFormatAttribute)0
@@ -227,11 +233,14 @@ int main( int argc, char** argv )
 
 	std::string demoPath;
 	int benchFrames = 0;
+	bool legacyGL   = false;
 	for( int i = 2; i < argc; ++i )
 	{
 		const std::string a = argv[ i ];
 		if( a == "--demo" && i + 1 < argc )
 			demoPath = argv[ i + 1 ];
+		else if( a == "--legacy-gl" )
+			legacyGL = true;
 		else if( a == "--bench" && i + 1 < argc )
 			benchFrames = atoi( argv[ i + 1 ] );
 		else if( a == "--size" && i + 1 < argc )
@@ -257,7 +266,7 @@ int main( int argc, char** argv )
 		return 1;
 	}
 
-	CGLContextObj ctx = createContext();
+	CGLContextObj ctx = createContext( legacyGL );
 	if( ctx == nullptr )
 		return 1;
 

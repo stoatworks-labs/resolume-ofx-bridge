@@ -185,18 +185,44 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 		return false;
 	}
 
-	_input  = std::make_unique< ofxbridge::Frame >();
-	_output = std::make_unique< ofxbridge::Frame >();
-	_input->allocate( width, height, /*asFloat*/ false );
-	_output->allocate( width, height, /*asFloat*/ false );
+	if( useGLPath() )
+	{
+		// The plugin reads and writes textures, so the CPU frames would never be
+		// touched -- at 4K that is 66MB of allocation saved per instance.
+		if( !_effect->attachGLContext( error ) )
+		{
+			_effect.reset();
+			_effectFailed = true;
+			return false;
+		}
+		_glContextAttached = true;
+	}
+	else
+	{
+		_input  = std::make_unique< ofxbridge::Frame >();
+		_output = std::make_unique< ofxbridge::Frame >();
+		_input->allocate( width, height, /*asFloat*/ false );
+		_output->allocate( width, height, /*asFloat*/ false );
+	}
 
 	_effectWidth  = width;
 	_effectHeight = height;
 	return true;
 }
 
+bool OfxFFGLPlugin::useGLPath() const
+{
+	// Both sides must agree. The host always offers it; the plugin usually does
+	// not, since Resolve -- which most OFX plugins target -- uses Metal or CUDA
+	// rather than the OFX OpenGL render path.
+	return PluginContext::get().manifest.supportsOpenGLRender;
+}
+
 void OfxFFGLPlugin::destroyEffect()
 {
+	if( _effect && _glContextAttached )
+		_effect->detachGLContext();
+	_glContextAttached = false;
 	_effect.reset();
 	_host.reset();
 	_input.reset();
@@ -306,18 +332,58 @@ bool OfxFFGLPlugin::readbackTexture( const FFGLTextureStruct& texture )
 	return true;
 }
 
+void OfxFFGLPlugin::ensureBlitTexture( int width, int height )
+{
+	if( _texWidth == width && _texHeight == height )
+		return;
+
+	glBindTexture( GL_TEXTURE_2D, _blitTex );
+	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	_texWidth  = width;
+	_texHeight = height;
+}
+
+bool OfxFFGLPlugin::renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height )
+{
+	ensureBlitTexture( width, height );
+
+	// The OFX OpenGL contract is that the plugin draws into whatever framebuffer
+	// is currently bound; the output texture it fetches is for reference. So bind
+	// our own target and hand the plugin both texture names.
+	glBindFramebuffer( GL_FRAMEBUFFER, _blitFbo );
+	glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _blitTex, 0 );
+	if( glCheckFramebufferStatus( GL_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+	glViewport( 0, 0, width, height );
+
+	std::string error;
+	const bool ok =
+		_effect->renderGL( in.Handle, _blitTex, GL_TEXTURE_2D, width, height, _time, error );
+
+	if( !ok )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+
+	// Hand the result to the host exactly as the CPU path does.
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, _blitFbo );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, pGL->HostFBO );
+	glBlitFramebuffer( 0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+	glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+	return true;
+}
+
 bool OfxFFGLPlugin::uploadAndBlit( ProcessOpenGLStruct* pGL, int width, int height )
 {
-	if( _texWidth != width || _texHeight != height )
-	{
-		glBindTexture( GL_TEXTURE_2D, _blitTex );
-		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
-		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
-		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
-		glBindTexture( GL_TEXTURE_2D, 0 );
-		_texWidth  = width;
-		_texHeight = height;
-	}
+	ensureBlitTexture( width, height );
 
 	glBindTexture( GL_TEXTURE_2D, _blitTex );
 	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
@@ -399,6 +465,21 @@ FFResult OfxFFGLPlugin::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		return FF_FAIL;
 
 	FrameTimer timer;
+
+	if( useGLPath() )
+	{
+		applyParams();
+		if( !renderViaGL( pGL, in, width, height ) )
+			return FF_FAIL;
+		if( timer.enabled )
+		{
+			glFinish();
+			timer.renderUs = timer.lap();
+			fprintf( stderr, "[timing] %dx%d  GL render %8.1fus (no CPU round trip)\n",
+					 width, height, timer.renderUs );
+		}
+		return FF_SUCCESS;
+	}
 
 	if( !readbackTexture( in ) )
 		return FF_FAIL;

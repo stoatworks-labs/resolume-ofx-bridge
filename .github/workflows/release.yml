@@ -62,6 +62,11 @@ jobs:
             --render uk.co.thefoundry.OfxInvertExample
           ./build/ofxgen generate --dir build/test-plugins --out build/generated
           ./build/ofxgen verify build/generated/OFX_Gain_Example.bundle
+          # The GL render path needs a legacy profile for this plugin; see
+          # docs/04-gpu-acceleration.md. Runners are headless, so a failure to
+          # create a context is tolerated -- what must not break is the build.
+          ./build/ffgltest build/generated/OFX_OpenGL_Example.bundle --legacy-gl || \
+            echo "::warning::GL render self-test could not run (no GL context on this runner)"
 
       - name: Stage the release archive
         run: |

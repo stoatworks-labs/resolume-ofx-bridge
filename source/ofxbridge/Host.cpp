@@ -290,6 +290,104 @@ bool Effect::render( Frame& in, Frame& out, double time, std::string& error )
 	return true;
 }
 
+bool Effect::supportsOpenGLRender() const
+{
+	// The descriptor answers for the plugin; our own host property says only what
+	// we are willing to do.
+	const OFX::Host::Property::Set& props = getDescriptor().getProps();
+	return props.getStringProperty( kOfxImageEffectPropOpenGLRenderSupported ) == "true";
+}
+
+bool Effect::attachGLContext( std::string& error )
+{
+	const OfxStatus st = contextAttachedAction();
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "kOfxActionOpenGLContextAttached failed";
+		return false;
+	}
+	return true;
+}
+
+void Effect::detachGLContext()
+{
+	contextDetachedAction();
+}
+
+bool Effect::renderGL( unsigned int inputTexture, unsigned int outputTexture, unsigned int target,
+					   int width, int height, double time, std::string& error )
+{
+	_time = time;
+	setFrameSize( width, height );
+
+	Clip* source = dynamic_cast< Clip* >( getClip( kOfxImageEffectSimpleSourceClipName ) );
+	Clip* output = dynamic_cast< Clip* >( getClip( kOfxImageEffectOutputClipName ) );
+	if( output == nullptr )
+	{
+		error = "effect has no output clip";
+		return false;
+	}
+
+	if( source )
+		source->setTexture( inputTexture, target, width, height );
+	output->setTexture( outputTexture, target, width, height );
+
+	OfxRectI window = { 0, 0, width, height };
+	OfxPointD scale = { 1.0, 1.0 };
+
+	OfxStatus st = beginRenderAction( time, time, 1.0, false, scale, false, false );
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "begin render failed";
+		if( source )
+			source->clearTexture();
+		output->clearTexture();
+		return false;
+	}
+
+	// HostSupport's renderAction has no way to set kOfxImageEffectPropOpenGLEnabled,
+	// so the action is issued here instead. This mirrors
+	// Instance::renderAction (ofxhImageEffect.cpp:918) with that one property added
+	// -- without it a GL-capable plugin takes its CPU branch, or refuses outright
+	// as the OpenFX example does.
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxPropTime, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxImageEffectPropFieldToRender, OFX::Host::Property::eString, 1, true, "" },
+		{ kOfxImageEffectPropRenderWindow, OFX::Host::Property::eInt, 4, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropSequentialRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropInteractiveRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropRenderQualityDraft, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropOpenGLEnabled, OFX::Host::Property::eInt, 1, true, "0" },
+		OFX::Host::Property::propSpecEnd
+	};
+
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setStringProperty( kOfxImageEffectPropFieldToRender, kOfxImageFieldNone );
+	inArgs.setDoubleProperty( kOfxPropTime, time );
+	inArgs.setIntPropertyN( kOfxImageEffectPropRenderWindow, &window.x1, 4 );
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	inArgs.setIntProperty( kOfxImageEffectPropSequentialRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropInteractiveRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropRenderQualityDraft, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropOpenGLEnabled, 1 );
+
+	st = mainEntry( kOfxImageEffectActionRender, this->getHandle(), &inArgs, 0 );
+
+	endRenderAction( time, time, 1.0, false, scale, false, false );
+
+	if( source )
+		source->clearTexture();
+	output->clearTexture();
+
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "kOfxImageEffectActionRender (OpenGL) failed";
+		return false;
+	}
+	return true;
+}
+
 OFX::Host::ImageEffect::ClipInstance* Effect::newClipInstance( OFX::Host::ImageEffect::Instance* /*effect*/,
 															   OFX::Host::ImageEffect::ClipDescriptor* descriptor,
 															   int /*index*/ )

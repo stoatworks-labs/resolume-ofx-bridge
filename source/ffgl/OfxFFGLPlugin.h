@@ -65,6 +65,16 @@ private:
 	/// track which values Resolume changed.
 	void applyParams();
 
+	/// True when both the plugin and we can take the GL texture path, so no pixel
+	/// crosses to the CPU.
+	bool useGLPath() const;
+
+	/// Render straight from `in` into our blit texture, with no CPU round trip.
+	bool renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
+
+	/// Make sure `_blitTex` exists and is `width` x `height`.
+	void ensureBlitTexture( int width, int height );
+
 	/// Pull `texture` into `_input`.
 	bool readbackTexture( const FFGLTextureStruct& texture );
 	/// Push `_output` to the currently bound draw framebuffer.
@@ -90,6 +100,7 @@ private:
 	int _effectWidth  = 0;
 	int _effectHeight = 0;
 	bool _effectFailed = false;
+	bool _glContextAttached = false;
 
 	double _time = 0.0;
 };

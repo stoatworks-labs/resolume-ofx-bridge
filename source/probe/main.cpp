@@ -243,6 +243,7 @@ int main( int argc, char** argv )
 		printf( "  grouping   : %s\n", p.grouping.c_str() );
 		printf( "  version    : %d.%d\n", p.versionMajor, p.versionMinor );
 		printf( "  bundle     : %s\n", p.bundlePath.c_str() );
+		printf( "  gl render  : %s\n", p.supportsOpenGLRender ? "yes" : "no" );
 		printf( "  contexts   : " );
 		for( const auto& c : p.contexts )
 			printf( "%s ", c.c_str() );

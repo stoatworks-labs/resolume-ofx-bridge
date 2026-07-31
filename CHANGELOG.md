@@ -5,6 +5,38 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-07-31
+
+### Added
+
+- **OFX OpenGL render path.** When a plugin advertises
+  `kOfxImageEffectPropOpenGLRenderSupported`, the wrapper hands it the GL texture
+  directly and no pixel crosses to the CPU. Negotiated per plugin and recorded in
+  the manifest; the CPU path remains the fallback. On the GL path no CPU frames
+  are allocated at all, saving 66 MB per instance at 4K.
+- **Per-stage timing** via `OFXBRIDGE_TIMING=1`, and `ffgltest --bench` /
+  `--size` for measuring a frame properly.
+- `ffgltest --legacy-gl` for testing GL-render plugins that use immediate mode.
+- The OpenFX OpenGL example is now part of the test corpus.
+- [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md), covering the
+  measurements, the three OFX GPU paths and what is actually implemented.
+
+### Measured
+
+On an M4 Max, the Gain example pipelined: **2.25 ms/frame at 1080p** (13% of a
+60fps budget) and **2.94 ms at 4K** (18%). The transfer costs ~2.2 ms at both
+resolutions — it is bound by synchronisation latency, not bandwidth, because
+memory is unified. The CPU round trip is therefore not the main cost on Apple
+Silicon; a heavy plugin's own CPU render is.
+
+### Known limitation
+
+An OFX plugin using the OpenGL render path can only work inside Resolume if it
+draws with **core-profile** GL. The OpenFX example uses immediate mode, which is
+illegal in a core profile and unavailable above GL 2.1 on macOS, so it renders
+correctly under `--legacy-gl` and produces a black frame in the core context
+Resolume actually uses. No host-side change can fix that.
+
 ## [0.1.0] — 2026-07-31
 
 First release. A working prototype: verified against real OFX plugins by the
@@ -41,4 +73,5 @@ harnesses in this repo, but never loaded into Resolume itself.
 - `createEffect` loads every bundle in the target's directory, because
   HostSupport's `addFileToPath` is directory-scoped.
 
+[0.2.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.2.0
 [0.1.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.1.0

@@ -126,6 +126,9 @@ bool Manifest::load( const std::string& path, Manifest& out, std::string& error 
 	out.versionMinor  = (int)num( "versionMinor", 0 );
 	out.indexInBundle = (int)num( "indexInBundle", 0 );
 
+	if( const Json* v = root.find( "supportsOpenGLRender" ) )
+		out.supportsOpenGLRender = v->boolean();
+
 	if( out.identifier.empty() || out.bundlePath.empty() )
 	{
 		error = "manifest is missing identifier or bundlePath";
