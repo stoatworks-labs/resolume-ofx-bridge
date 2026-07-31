@@ -76,6 +76,16 @@ struct PluginDesc
 	/// GPU-only: without this path they do not render slowly, they fail.
 	bool supportsMetalRender = false;
 
+	/// True if the plugin advertises OFX OpenCL *buffer* render.
+	bool supportsOpenCLRender = false;
+
+	/// True if the plugin advertises OFX CUDA render.
+	///
+	/// Detection works everywhere, but the bridge does not: see
+	/// docs/04-gpu-acceleration.md. On a machine without CUDA such a plugin is
+	/// reported and then declined, rather than half-run.
+	bool supportsCudaRender = false;
+
 	std::vector< ParamDesc > params;
 
 	/// Non-empty if describe failed; the plugin is then unusable.

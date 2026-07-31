@@ -119,6 +119,21 @@ system. Users do not need Xcode/MSVC.
 - `MetalBridge.mm` needs `-fobjc-arc`, or the Metal objects it holds are not
   retained.
 
+### OpenCL and CUDA
+
+- **`clCreateFromGLBuffer` takes a GL buffer, not a texture**, so the shared
+  object is a PBO rather than an IOSurface. `glReadPixels` into a pixel-pack
+  buffer stays on the GPU.
+- **The CL context must come from the CGL share group**
+  (`CL_CONTEXT_PROPERTY_USE_CGL_SHAREGROUP_APPLE`) or `clCreateFromGLBuffer`
+  returns `CL_INVALID_CONTEXT`.
+- Ownership is explicit: `clEnqueueAcquireGLObjects` / `ReleaseGLObjects`, plus
+  `clFinish` before GL reads the output.
+- **CUDA is UNVERIFIED** — never compiled, never run, no NVIDIA hardware. The
+  host deliberately does not advertise `kOfxImageEffectPropCudaRenderSupported`
+  unless built with `OFXBRIDGE_ENABLE_CUDA`, so CUDA plugins are declined cleanly
+  instead of failing mid-render. Do not "fix" that by advertising it.
+
 ### Known limitation
 
 `createEffect` loads every OFX bundle in the target bundle's directory, because
@@ -183,5 +198,5 @@ Assumed / not yet done:
 - GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only, which means
   a full texture round trip per frame.
 - Windows and Linux are untried; `ofxgen verify` is macOS/Linux only.
-- CUDA and OpenCL are not implemented (Resolve uses them on Windows/Linux).
+- CUDA is written but never compiled or run (no NVIDIA hardware).
 - No generator GUI yet.

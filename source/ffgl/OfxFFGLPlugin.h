@@ -9,6 +9,7 @@
 
 #include "Manifest.h"
 #include "MetalBridge.h"
+#include "OpenCLBridge.h"
 
 #include "FFGLSDK.h"
 
@@ -79,6 +80,13 @@ private:
 	/// plugin -> back, with no CPU round trip.
 	bool renderViaMetal( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
 
+	/// True when the plugin renders with OpenCL.
+	bool useOpenCLPath() const;
+
+	/// Render through OpenCL: GL texture -> shared PBO -> cl_mem -> plugin ->
+	/// back, with no CPU round trip.
+	bool renderViaOpenCL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
+
 	/// Render straight from `in` into our blit texture, with no CPU round trip.
 	bool renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height );
 
@@ -115,6 +123,10 @@ private:
 	MetalBridge _metal;
 	bool _metalReady  = false;
 	bool _metalFailed = false;
+
+	OpenCLBridge _opencl;
+	bool _openclReady  = false;
+	bool _openclFailed = false;
 
 	double _time = 0.0;
 };

@@ -190,6 +190,27 @@ public:
 	bool renderMetal( void* sourceBuffer, void* outputBuffer, int rowBytes, void* commandQueue,
 					  int width, int height, double time, std::string& error );
 
+	/// True if this plugin advertises OFX OpenCL buffer render.
+	bool supportsOpenCLRender() const;
+
+	/// Render via OFX OpenCL render. Buffers are `cl_mem`, the queue a
+	/// `cl_command_queue`, both as void* to keep this header OpenCL-free.
+	bool renderOpenCL( void* sourceMem, void* outputMem, int rowBytes, void* commandQueue, int width,
+					   int height, double time, std::string& error );
+
+	/// True if this plugin advertises OFX CUDA render.
+	bool supportsCudaRender() const;
+
+	/// Render via OFX CUDA render. The buffers are CUDA device pointers and
+	/// `stream` an optional cudaStream_t, both void* here.
+	///
+	/// **UNVERIFIED.** This has never been compiled against the CUDA toolkit nor
+	/// executed: CUDA needs an NVIDIA GPU, which macOS has not supported since
+	/// 10.13 and Apple Silicon has never had. It is written from the OFX
+	/// specification alone. Treat it as a starting point, not working code.
+	bool renderCuda( void* sourceBuffer, void* outputBuffer, int rowBytes, void* stream, int width,
+					 int height, double time, std::string& error );
+
 	// -- Instance interface -----------------------------------------------------
 	OFX::Host::ImageEffect::ClipInstance* newClipInstance( OFX::Host::ImageEffect::Instance* effect,
 														   OFX::Host::ImageEffect::ClipDescriptor* descriptor,

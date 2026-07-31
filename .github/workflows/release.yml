@@ -74,7 +74,8 @@ jobs:
           # work -- so --require-gpu exits 3 and we skip, rather than reporting a
           # pass that means nothing. Any other non-zero status is a real failure.
           for t in "OFX_OpenGL_Example.bundle --legacy-gl" \
-                   "Metal_Gain_Example.bundle 0=0.5 --expect-centre 64,64,64,127"; do
+                   "Metal_Gain_Example.bundle 0=0.5 --expect-centre 64,64,64,127" \
+                   "OpenCL_Gain_Example.bundle 0=0.5 --expect-centre 64,64,64,127"; do
             set +e
             ./build/ffgltest build/generated/$t --require-gpu
             rc=$?

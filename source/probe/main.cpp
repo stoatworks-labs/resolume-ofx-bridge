@@ -245,6 +245,9 @@ int main( int argc, char** argv )
 		printf( "  bundle     : %s\n", p.bundlePath.c_str() );
 		printf( "  gl render  : %s\n", p.supportsOpenGLRender ? "yes" : "no" );
 		printf( "  metal      : %s\n", p.supportsMetalRender ? "yes" : "no" );
+		printf( "  opencl     : %s\n", p.supportsOpenCLRender ? "yes" : "no" );
+		printf( "  cuda       : %s%s\n", p.supportsCudaRender ? "yes" : "no",
+				p.supportsCudaRender ? "  (bridge UNVERIFIED -- see docs/04)" : "" );
 		printf( "  contexts   : " );
 		for( const auto& c : p.contexts )
 			printf( "%s ", c.c_str() );

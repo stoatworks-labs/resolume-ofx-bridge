@@ -135,6 +135,8 @@ FFResult OfxFFGLPlugin::DeInitGL()
 	destroyEffect();
 	_metal.shutdown();
 	_metalReady = false;
+	_opencl.shutdown();
+	_openclReady = false;
 	return FF_SUCCESS;
 }
 
@@ -206,10 +208,28 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 		}
 	}
 
-	if( useMetalPath() )
+	if( PluginContext::get().manifest.supportsOpenCLRender && !_openclReady && !_openclFailed )
 	{
-		// Nothing to allocate: the plugin reads and writes MTLBuffers that share
-		// memory with the GL textures.
+		std::string clError;
+		if( _opencl.init( clError ) && _opencl.resize( width, height, clError ) )
+			_openclReady = true;
+		else
+			_openclFailed = true;
+	}
+	else if( _openclReady )
+	{
+		std::string clError;
+		if( !_opencl.resize( width, height, clError ) )
+		{
+			_openclReady  = false;
+			_openclFailed = true;
+		}
+	}
+
+	if( useMetalPath() || useOpenCLPath() )
+	{
+		// Nothing to allocate: the plugin reads and writes GPU buffers that share
+		// memory with GL objects.
 	}
 	else if( useGLPath() )
 	{
@@ -241,10 +261,21 @@ bool OfxFFGLPlugin::useMetalPath() const
 	return PluginContext::get().manifest.supportsMetalRender && _metalReady;
 }
 
+bool OfxFFGLPlugin::useOpenCLPath() const
+{
+	// Metal wins on macOS when a plugin offers both: it is native, whereas
+	// OpenCL here is a deprecated compatibility layer.
+	if( PluginContext::get().manifest.supportsMetalRender && _metalReady )
+		return false;
+	return PluginContext::get().manifest.supportsOpenCLRender && _openclReady;
+}
+
 bool OfxFFGLPlugin::useGLPath() const
 {
-	// Metal wins when a plugin offers both.
+	// The GPU buffer paths win when a plugin offers both.
 	if( PluginContext::get().manifest.supportsMetalRender && _metalReady )
+		return false;
+	if( PluginContext::get().manifest.supportsOpenCLRender && _openclReady )
 		return false;
 
 	// Both sides must agree. The host always offers it; the plugin usually does
@@ -432,6 +463,64 @@ bool OfxFFGLPlugin::renderViaMetal( ProcessOpenGLStruct* pGL, const FFGLTextureS
 	return true;
 }
 
+bool OfxFFGLPlugin::renderViaOpenCL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width,
+									 int height )
+{
+	const int rowBytes = _opencl.rowBytes();
+
+	// 1. Host texture -> source PBO. glReadPixels into a bound pixel-pack buffer
+	//    is a GPU-side copy: nothing reaches the CPU.
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, _readFbo );
+	glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, in.Handle, 0 );
+	if( glCheckFramebufferStatus( GL_READ_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+	glBindBuffer( GL_PIXEL_PACK_BUFFER, _opencl.sourcePbo() );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+	glReadPixels( 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+
+	// 2. Hand the shared buffers to OpenCL.
+	if( !_opencl.acquireFromGL() )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+
+	std::string error;
+	const bool ok = _effect->renderOpenCL( _opencl.sourceMem(), _opencl.outputMem(), rowBytes,
+										   _opencl.commandQueue(), width, height, _time, error );
+
+	// 3. Give them back, and wait for the plugin's queued work.
+	_opencl.releaseToGL();
+
+	if( !ok )
+	{
+		glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+		return false;
+	}
+
+	// 4. Output PBO -> our texture -> host framebuffer.
+	ensureBlitTexture( width, height );
+	glBindBuffer( GL_PIXEL_UNPACK_BUFFER, _opencl.outputPbo() );
+	glBindTexture( GL_TEXTURE_2D, _blitTex );
+	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	glBindBuffer( GL_PIXEL_UNPACK_BUFFER, 0 );
+
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, _blitFbo );
+	glFramebufferTexture2D( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, _blitTex, 0 );
+	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, pGL->HostFBO );
+	glBlitFramebuffer( 0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	glBindFramebuffer( GL_READ_FRAMEBUFFER, 0 );
+	glBindFramebuffer( GL_FRAMEBUFFER, pGL->HostFBO );
+	return true;
+}
+
 bool OfxFFGLPlugin::renderViaGL( ProcessOpenGLStruct* pGL, const FFGLTextureStruct& in, int width, int height )
 {
 	ensureBlitTexture( width, height );
@@ -561,6 +650,20 @@ FFResult OfxFFGLPlugin::ProcessOpenGL( ProcessOpenGLStruct* pGL )
 		{
 			timer.renderUs = timer.lap();
 			fprintf( stderr, "[timing] %dx%d  Metal render %8.1fus (no CPU round trip)\n", width, height,
+					 timer.renderUs );
+		}
+		return FF_SUCCESS;
+	}
+
+	if( useOpenCLPath() )
+	{
+		applyParams();
+		if( !renderViaOpenCL( pGL, in, width, height ) )
+			return FF_FAIL;
+		if( timer.enabled )
+		{
+			timer.renderUs = timer.lap();
+			fprintf( stderr, "[timing] %dx%d  OpenCL render %8.1fus (no CPU round trip)\n", width, height,
 					 timer.renderUs );
 		}
 		return FF_SUCCESS;

@@ -374,6 +374,167 @@ bool Effect::renderMetal( void* sourceBuffer, void* outputBuffer, int rowBytes, 
 	return true;
 }
 
+bool Effect::supportsCudaRender() const
+{
+	const OFX::Host::Property::Set& props = getDescriptor().getProps();
+	return props.getStringProperty( kOfxImageEffectPropCudaRenderSupported ) == "true";
+}
+
+bool Effect::renderCuda( void* sourceBuffer, void* outputBuffer, int rowBytes, void* stream, int width,
+						 int height, double time, std::string& error )
+{
+	// ---------------------------------------------------------------------
+	// UNVERIFIED. Never compiled against the CUDA toolkit, never executed.
+	// Written from the OFX specification; there is no NVIDIA hardware on which
+	// to run it. See docs/04-gpu-acceleration.md.
+	// ---------------------------------------------------------------------
+	_time = time;
+	setFrameSize( width, height );
+
+	Clip* source = dynamic_cast< Clip* >( getClip( kOfxImageEffectSimpleSourceClipName ) );
+	Clip* output = dynamic_cast< Clip* >( getClip( kOfxImageEffectOutputClipName ) );
+	if( output == nullptr )
+	{
+		error = "effect has no output clip";
+		return false;
+	}
+
+	if( source )
+		source->setMetalBuffer( sourceBuffer, rowBytes, width, height );
+	output->setMetalBuffer( outputBuffer, rowBytes, width, height );
+
+	OfxRectI window = { 0, 0, width, height };
+	OfxPointD scale = { 1.0, 1.0 };
+
+	OfxStatus st = beginRenderAction( time, time, 1.0, false, scale, false, false );
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "begin render failed";
+		if( source )
+			source->clearMetalBuffer();
+		output->clearMetalBuffer();
+		return false;
+	}
+
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxPropTime, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxImageEffectPropFieldToRender, OFX::Host::Property::eString, 1, true, "" },
+		{ kOfxImageEffectPropRenderWindow, OFX::Host::Property::eInt, 4, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropSequentialRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropInteractiveRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropRenderQualityDraft, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropCudaEnabled, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropCudaStream, OFX::Host::Property::ePointer, 1, true, "" },
+		OFX::Host::Property::propSpecEnd
+	};
+
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setStringProperty( kOfxImageEffectPropFieldToRender, kOfxImageFieldNone );
+	inArgs.setDoubleProperty( kOfxPropTime, time );
+	inArgs.setIntPropertyN( kOfxImageEffectPropRenderWindow, &window.x1, 4 );
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	inArgs.setIntProperty( kOfxImageEffectPropSequentialRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropInteractiveRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropRenderQualityDraft, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropCudaEnabled, 1 );
+	inArgs.setPointerProperty( kOfxImageEffectPropCudaStream, stream );
+
+	st = mainEntry( kOfxImageEffectActionRender, this->getHandle(), &inArgs, 0 );
+
+	endRenderAction( time, time, 1.0, false, scale, false, false );
+
+	if( source )
+		source->clearMetalBuffer();
+	output->clearMetalBuffer();
+
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "kOfxImageEffectActionRender (CUDA) failed";
+		return false;
+	}
+	return true;
+}
+
+bool Effect::supportsOpenCLRender() const
+{
+	const OFX::Host::Property::Set& props = getDescriptor().getProps();
+	return props.getStringProperty( kOfxImageEffectPropOpenCLRenderSupported ) == "true";
+}
+
+bool Effect::renderOpenCL( void* sourceMem, void* outputMem, int rowBytes, void* commandQueue, int width,
+						   int height, double time, std::string& error )
+{
+	_time = time;
+	setFrameSize( width, height );
+
+	Clip* source = dynamic_cast< Clip* >( getClip( kOfxImageEffectSimpleSourceClipName ) );
+	Clip* output = dynamic_cast< Clip* >( getClip( kOfxImageEffectOutputClipName ) );
+	if( output == nullptr )
+	{
+		error = "effect has no output clip";
+		return false;
+	}
+
+	// Same mechanism as Metal: kOfxImagePropData carries whichever handle the
+	// host said it enabled, so the existing buffer plumbing serves both.
+	if( source )
+		source->setMetalBuffer( sourceMem, rowBytes, width, height );
+	output->setMetalBuffer( outputMem, rowBytes, width, height );
+
+	OfxRectI window = { 0, 0, width, height };
+	OfxPointD scale = { 1.0, 1.0 };
+
+	OfxStatus st = beginRenderAction( time, time, 1.0, false, scale, false, false );
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "begin render failed";
+		if( source )
+			source->clearMetalBuffer();
+		output->clearMetalBuffer();
+		return false;
+	}
+
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxPropTime, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxImageEffectPropFieldToRender, OFX::Host::Property::eString, 1, true, "" },
+		{ kOfxImageEffectPropRenderWindow, OFX::Host::Property::eInt, 4, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropSequentialRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropInteractiveRenderStatus, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropRenderQualityDraft, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropOpenCLEnabled, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropOpenCLCommandQueue, OFX::Host::Property::ePointer, 1, true, "" },
+		OFX::Host::Property::propSpecEnd
+	};
+
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setStringProperty( kOfxImageEffectPropFieldToRender, kOfxImageFieldNone );
+	inArgs.setDoubleProperty( kOfxPropTime, time );
+	inArgs.setIntPropertyN( kOfxImageEffectPropRenderWindow, &window.x1, 4 );
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	inArgs.setIntProperty( kOfxImageEffectPropSequentialRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropInteractiveRenderStatus, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropRenderQualityDraft, 0 );
+	inArgs.setIntProperty( kOfxImageEffectPropOpenCLEnabled, 1 );
+	inArgs.setPointerProperty( kOfxImageEffectPropOpenCLCommandQueue, commandQueue );
+
+	st = mainEntry( kOfxImageEffectActionRender, this->getHandle(), &inArgs, 0 );
+
+	endRenderAction( time, time, 1.0, false, scale, false, false );
+
+	if( source )
+		source->clearMetalBuffer();
+	output->clearMetalBuffer();
+
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		error = "kOfxImageEffectActionRender (OpenCL) failed";
+		return false;
+	}
+	return true;
+}
+
 bool Effect::supportsOpenGLRender() const
 {
 	// The descriptor answers for the plugin; our own host property says only what
@@ -673,6 +834,20 @@ Host::Host()
 	// Metal render. Many Resolve-targeted plugins are GPU-only, so without this
 	// they do not render slowly -- they refuse to render at all.
 	_properties.setStringProperty( kOfxImageEffectPropMetalRenderSupported, "true" );
+
+	// OpenCL buffer render. Matters on Windows and Linux, where Resolve uses it
+	// on AMD hardware; on macOS it is deprecated but still functional, which is
+	// what makes the path testable here at all.
+	_properties.setStringProperty( kOfxImageEffectPropOpenCLRenderSupported, "true" );
+
+	// CUDA is deliberately NOT advertised. The render action exists but its
+	// GL interop has never been compiled or run, and claiming support we cannot
+	// honour would make a CUDA plugin fail confusingly mid-render rather than
+	// be declined cleanly up front. Build with OFXBRIDGE_ENABLE_CUDA to opt in
+	// on hardware where it can actually be tested.
+#ifdef OFXBRIDGE_ENABLE_CUDA
+	_properties.setStringProperty( kOfxImageEffectPropCudaRenderSupported, "true" );
+#endif
 
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipDepths, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultipleClipPARs, 0 );

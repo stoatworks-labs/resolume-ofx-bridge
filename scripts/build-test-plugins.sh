@@ -92,6 +92,21 @@ if [ "$(uname -s)" = "Darwin" ]; then
 	echo "  built metalgain.ofx.bundle"
 fi
 
+# OpenCL companion to the Metal plugin, and ours for the same reason. OpenCL is
+# deprecated on macOS but functional, which makes this the only platform where
+# the OpenCL path can currently be tested at all.
+if [ "$(uname -s)" = "Darwin" ]; then
+	echo "==> building the OpenCL test plugin"
+	bdl="$OUT/openclgain.ofx.bundle/Contents/MacOS"
+	mkdir -p "$bdl"
+	clang++ -std=c++17 -O2 -arch "$ARCH" -dynamiclib -fvisibility=hidden \
+		-DCL_SILENCE_DEPRECATION -I "$OFX/include" \
+		"$ROOT/testplugins/opencl-gain/openclgain.cpp" \
+		-framework OpenCL \
+		-o "$bdl/openclgain.ofx"
+	echo "  built openclgain.ofx.bundle"
+fi
+
 echo
 echo "test plugins in: $OUT"
 echo "try: ./build/ofxprobe --dir $OUT"

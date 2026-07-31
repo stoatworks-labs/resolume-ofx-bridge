@@ -103,8 +103,13 @@ if( APPLE )
 	# ARC, so the Metal objects held in MetalBridge are actually retained.
 	target_sources( ofxwrapper PRIVATE source/ffgl/MetalBridge.mm )
 	set_source_files_properties( source/ffgl/MetalBridge.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc" )
+	target_sources( ofxwrapper PRIVATE source/ffgl/OpenCLBridge.cpp )
 	target_link_libraries( ofxwrapper PRIVATE
-		"-framework Metal" "-framework IOSurface" "-framework Foundation" )
+		"-framework Metal" "-framework IOSurface" "-framework Foundation"
+		"-framework OpenCL" )
+	# OpenCL is deprecated on macOS but still functional, and this is the only
+	# platform where the OpenCL path can currently be tested.
+	target_compile_definitions( ofxwrapper PRIVATE CL_SILENCE_DEPRECATION GL_SILENCE_DEPRECATION )
 endif()
 target_include_directories( ofxwrapper PRIVATE source/ffgl )
 target_link_libraries( ofxwrapper PRIVATE ffgl::sdk ofxbridge )

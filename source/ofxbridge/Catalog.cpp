@@ -200,6 +200,10 @@ std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& sea
 			rootProps.getStringProperty( kOfxImageEffectPropOpenGLRenderSupported ) == "true";
 		desc.supportsMetalRender =
 			rootProps.getStringProperty( kOfxImageEffectPropMetalRenderSupported ) == "true";
+		desc.supportsOpenCLRender =
+			rootProps.getStringProperty( kOfxImageEffectPropOpenCLRenderSupported ) == "true";
+		desc.supportsCudaRender =
+			rootProps.getStringProperty( kOfxImageEffectPropCudaRenderSupported ) == "true";
 
 		// Which contexts does it offer? We can only host Filter.
 		{
@@ -323,6 +327,8 @@ std::string toManifestJson( const PluginDesc& p )
 	o << "  \"indexInBundle\": " << p.indexInBundle << ",\n";
 	o << "  \"supportsOpenGLRender\": " << ( p.supportsOpenGLRender ? "true" : "false" ) << ",\n";
 	o << "  \"supportsMetalRender\": " << ( p.supportsMetalRender ? "true" : "false" ) << ",\n";
+	o << "  \"supportsOpenCLRender\": " << ( p.supportsOpenCLRender ? "true" : "false" ) << ",\n";
+	o << "  \"supportsCudaRender\": " << ( p.supportsCudaRender ? "true" : "false" ) << ",\n";
 	o << "  \"params\": [\n";
 
 	for( size_t i = 0; i < p.params.size(); ++i )

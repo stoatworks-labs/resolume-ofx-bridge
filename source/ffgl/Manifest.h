@@ -49,6 +49,8 @@ struct Manifest
 	bool supportsOpenGLRender = false;
 	/// Whether the plugin can take the Metal buffer path.
 	bool supportsMetalRender = false;
+	/// Whether the plugin can take the OpenCL buffer path.
+	bool supportsOpenCLRender = false;
 	std::vector< ManifestParam > params;
 
 	static bool load( const std::string& path, Manifest& out, std::string& error );

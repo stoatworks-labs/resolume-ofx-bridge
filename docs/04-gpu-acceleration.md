@@ -186,7 +186,77 @@ It is deliberately **GPU-only** — it declares no CPU path and returns
 plugins this path is meant to unlock, and means a host that quietly falls back to
 CPU is caught rather than flattered.
 
-## Still missing
+## What is implemented: OpenCL
 
-CUDA and OpenCL. Those matter on Windows and Linux, where Resolve uses them
-instead of Metal — and where this project has never been compiled at all.
+OFX defines two OpenCL modes; this implements the **buffer** variant
+(`kOfxImageEffectPropOpenCLRenderSupported`, where `kOfxImagePropData` is a
+`cl_mem` buffer), which is what Resolve uses.
+
+Where Metal shares an IOSurface, OpenCL's buffer interop (`clCreateFromGLBuffer`)
+takes a GL *buffer*, not a texture. So the shared object is a **pixel buffer
+object**:
+
+```
+host GL texture --glReadPixels--> PBO (= cl_mem) --kernel--> PBO --> texture
+```
+
+`glReadPixels` into a bound pixel-pack buffer and `glTexSubImage2D` from a
+pixel-unpack buffer both stay on the GPU, so despite the extra hop no pixel
+crosses to the CPU. On macOS the CL context is created from the current CGL share
+group (`CL_CONTEXT_PROPERTY_USE_CGL_SHAREGROUP_APPLE`) — without that,
+`clCreateFromGLBuffer` fails with `CL_INVALID_CONTEXT`.
+
+Ownership transfers explicitly, via `clEnqueueAcquireGLObjects` /
+`clEnqueueReleaseGLObjects`, and the host calls `clFinish` before GL reads the
+output — the OFX contract lets a plugin return before its kernel completes.
+
+### Measured
+
+| | CPU | Metal | OpenCL |
+|---|---|---|---|
+| 1080p | 2.22 ms | 0.42 ms | **0.53 ms** |
+| 4K | 2.95 ms | 0.64 ms | **1.07 ms** |
+
+OpenCL trails Metal, which is expected: an extra PBO hop, and OpenCL on macOS is
+a deprecated compatibility layer over Metal rather than a native path. Metal
+therefore wins when a plugin offers both.
+
+### Verified
+
+Gain at 0.5 halves every channel including alpha; at 1.0 it is bit-exact identity,
+ruling out a blit-through. `testplugins/opencl-gain/` is ours and GPU-only, for
+the same reasons as the Metal one.
+
+**Why this is testable here at all:** OpenCL is deprecated on macOS but still
+functional — `clGetPlatformIDs` returns an Apple platform with the M4 Max as a
+device. In production OpenCL matters on Windows and Linux, where Resolve uses it
+on AMD hardware.
+
+## CUDA — written, never run
+
+> **This path is UNVERIFIED.** It has never been compiled against the CUDA
+> toolkit and never executed. Everything else in this repo is proven against a
+> real plugin; this is not. Treat it as a starting point.
+
+CUDA needs an NVIDIA GPU. NVIDIA dropped macOS after 10.13, and Apple Silicon has
+never had an NVIDIA part — so there is no hardware here on which to compile or run
+it, and no way to write a CUDA test plugin that could be executed.
+
+What exists:
+
+- **Detection works.** `ofxprobe` reports `cuda: yes` for a plugin that advertises
+  `kOfxImageEffectPropCudaRenderSupported`, and flags the bridge as unverified.
+- **`Effect::renderCuda` is written** from the specification, setting
+  `kOfxImageEffectPropCudaEnabled` and `kOfxImageEffectPropCudaStream`. It is pure
+  property manipulation, so it compiles everywhere — but compiling is not running.
+- **The host does not advertise CUDA support.** Claiming it would make a CUDA
+  plugin fail confusingly mid-render instead of being declined cleanly. Build with
+  `-DOFXBRIDGE_ENABLE_CUDA` to opt in on hardware where it can be tested.
+
+The missing piece is GL↔CUDA interop — `cudaGraphicsGLRegisterBuffer` and
+`cudaGraphicsMapResources` over a PBO, structurally the same as the OpenCL path.
+That is deliberately not written blind, because there would be no way to tell
+whether it was right.
+
+**Prerequisite:** CUDA only matters on Windows and Linux, and this project has
+never been compiled for either. Platform support comes first.

@@ -27,6 +27,7 @@ So the corpus is built from the OpenFX project's example plugins:
 | `Custom` | General context only — exercises the "cannot host this" path |
 | `OpenGL` | implements OFX OpenGL render — the only test subject for that path |
 | `metalgain` | **ours**, not vendored: implements OFX Metal render, GPU-only |
+| `openclgain` | **ours**: implements OFX OpenCL buffer render, GPU-only |
 
 ## Level 1 — introspection
 
@@ -143,6 +144,22 @@ The test plugin is GPU-only by design: it returns `kOfxStatErrImageFormat` if th
 host has not set `kOfxImageEffectPropMetalEnabled`, so a host that quietly falls
 back to CPU fails the test rather than passing it.
 
+## Level 7 — the OpenCL render path
+
+```bash
+./build/ffgltest build/generated/OpenCL_Gain_Example.bundle 0=0.5 --expect-centre 64,64,64,127
+```
+
+Verified: gain 0.5 halves every channel including alpha, and 1.0 is bit-exact
+identity, ruling out a blit-through. GPU-only test plugin, as with Metal.
+
+## CUDA is not verified at all
+
+There is no NVIDIA GPU here, so the CUDA path has never been compiled against the
+toolkit or executed, and no CUDA test plugin exists because none could be run.
+Detection works; the bridge does not exist. See
+[04-gpu-acceleration.md](04-gpu-acceleration.md).
+
 ## Performance
 
 ```bash
@@ -152,10 +169,10 @@ OFXBRIDGE_TIMING=1 ./build/ffgltest <bundle> --size 1920x1080
 
 Measured on an M4 Max, pipelined:
 
-| | CPU path | Metal path |
-|---|---|---|
-| 1080p | 2.14 ms | 0.40 ms |
-| 4K | 3.20 ms | 0.90 ms |
+| | CPU | Metal | OpenCL |
+|---|---|---|---|
+| 1080p | 2.22 ms | 0.42 ms | 0.53 ms |
+| 4K | 2.95 ms | 0.64 ms | 1.07 ms |
 
 On the CPU path the transfer costs ~2.2 ms at both resolutions — latency-bound
 rather than bandwidth-bound, because memory is unified.
@@ -196,6 +213,7 @@ code. Both the assertion and the explicit skip exist because of it.
   core-profile path that ships.
 - **Windows and Linux are untried.** The code paths exist; `ffgltest` is
   macOS-only, as it creates its context with CGL directly.
+- **CUDA, entirely.** Written from the specification, never compiled, never run.
 - **The GPU paths on any machine but the author's.** CI cannot run them, so
   there is exactly one data point of hardware.
 - **No sustained run.** Nothing has been left running long enough to surface a

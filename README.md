@@ -163,8 +163,12 @@ ranges survive intact.
   *OpenGL render* is supported too. Everything else takes the CPU path, a full
   GPU → CPU → GPU trip per frame. See
   [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md).
-- **CUDA and OpenCL are not implemented**, so GPU-only plugins that use those
-  (Resolve on Windows and Linux) will not run. macOS Metal plugins will.
+- **OpenCL is implemented and verified** (4.2× faster than CPU at 1080p), though
+  Metal wins when a plugin offers both.
+- **CUDA is written but has never been compiled or run** — it needs an NVIDIA GPU,
+  which macOS has not supported since 10.13. The host does not advertise CUDA
+  support, so such plugins are declined cleanly rather than failing mid-render.
+  See [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md).
 - **OpenGL-render plugins must use core-profile GL** to work in Resolume.
   Immediate-mode drawing is illegal in a core profile and macOS has no
   compatibility profile above 2.1.

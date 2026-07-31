@@ -5,6 +5,34 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-07-31
+
+### Added
+
+- **OFX OpenCL render path (buffer variant), verified.** GL and OpenCL share a
+  pixel buffer object — `clCreateFromGLBuffer` takes a GL buffer, not a texture,
+  so a PBO stands in for Metal's IOSurface. No pixel crosses to the CPU.
+  **4.2× faster than the CPU path at 1080p** (2.22 ms → 0.53 ms), 2.8× at 4K.
+  Metal still wins when a plugin offers both, since OpenCL on macOS is a
+  deprecated compatibility layer over Metal.
+- **An OpenCL OFX test plugin** (`testplugins/opencl-gain/`), GPU-only, for the
+  same reason as the Metal one: no such plugin is publicly available.
+- **CUDA detection and render action** — see the caveat below.
+
+### Unverified
+
+**The CUDA path has never been compiled or run.** It needs an NVIDIA GPU, which
+macOS has not supported since 10.13 and Apple Silicon has never had. Detection
+works and `Effect::renderCuda` is written from the OFX specification, but the
+GL↔CUDA interop is deliberately not written blind, and the host does **not**
+advertise CUDA support — a CUDA plugin is declined cleanly rather than failing
+confusingly mid-render. Build with `-DOFXBRIDGE_ENABLE_CUDA` to opt in on
+hardware where it can actually be tested.
+
+Everything else in this project is proven against a real plugin. This is the one
+exception, and it is marked as such in the probe output, the headers, the code
+and the docs.
+
 ## [0.3.1] — 2026-07-31
 
 ### Fixed
@@ -116,6 +144,7 @@ harnesses in this repo, but never loaded into Resolume itself.
 - `createEffect` loads every bundle in the target's directory, because
   HostSupport's `addFileToPath` is directory-scoped.
 
+[0.4.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.4.0
 [0.3.1]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.1
 [0.3.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.0
 [0.2.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.2.0
