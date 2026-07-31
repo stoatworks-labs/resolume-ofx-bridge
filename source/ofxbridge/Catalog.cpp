@@ -367,6 +367,11 @@ std::unique_ptr< Effect > createEffect( Host& host,
 	// The plugin cache owns the loaded binary and every descriptor hanging off
 	// it, so it must outlive the instance. One cache per bundle path is kept for
 	// the life of the process; a wrapper only ever needs one.
+	//
+	// KNOWN LIMITATION: addFileToPath only takes directories, so this loads and
+	// describes *every* bundle sitting beside the one we want, inside a live video
+	// process. That is wasteful and means a broken neighbour can misbehave during
+	// a show. Fixing it properly needs a bundle-scoped load path in HostSupport.
 	static std::map< std::string, std::unique_ptr< OFX::Host::ImageEffect::PluginCache > > caches;
 	static std::map< std::string, std::unique_ptr< OFX::Host::PluginCache > > binaryCaches;
 

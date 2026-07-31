@@ -116,3 +116,15 @@ endif()
 add_executable( ofxgen source/gen/main.cpp )
 target_link_libraries( ofxgen PRIVATE ofxbridge )
 add_dependencies( ofxgen ofxwrapper )
+
+# ---------------------------------------------------------------------------
+# ffgltest - drive a generated bundle through a real GL context
+#
+# The only way to exercise ProcessOpenGL without Resolume. macOS-only for now:
+# it creates the context with CGL directly.
+# ---------------------------------------------------------------------------
+if( APPLE )
+	add_executable( ffgltest source/gltest/main.cpp )
+	target_link_libraries( ffgltest PRIVATE ffgl::sdk "-framework OpenGL" )
+	add_dependencies( ffgltest ofxwrapper )
+endif()

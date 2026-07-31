@@ -51,6 +51,9 @@ system. Users do not need Xcode/MSVC.
   - `Host.{h,cpp}` — host, effect instance, clips, images, suites
   - `Params.{h,cpp}` — concrete param instances (HostSupport leaves these abstract)
   - `Catalog.{h,cpp}` — discovery, describe, manifest JSON
+- `source/ffgl/` — the generic FFGL wrapper (manifest, param mapping, GL bridge)
+- `source/gen/` — `ofxgen`, the generator + bundle verifier
+- `source/gltest/` — `ffgltest`, offscreen-GL harness for `ProcessOpenGL`
 - `source/probe/` — `ofxprobe` CLI
 - `external/openfx` — OFX headers + **HostSupport**, a BSD-3 host implementation
   maintained by the OFX project. Natron is built on it. Do not hand-roll suites.
@@ -85,6 +88,15 @@ system. Users do not need Xcode/MSVC.
   `.ofx.bundle` path finds nothing, with no error.
 - HostSupport declares every `Param::*Instance` abstract; the host supplies the
   storage. See `Params.{h,cpp}`.
+- **`CFFGLPlugin::InitGL` dereferences its viewport argument unconditionally**
+  (`FFGLPluginSDK.h:59`, `currentViewport = *vp`). Passing null traps.
+
+### Known limitation
+
+`createEffect` loads every OFX bundle in the target bundle's directory, because
+`addFileToPath` is directory-scoped. In a live video process that is wasteful and
+lets an unrelated broken plugin misbehave mid-show. A proper fix needs a
+bundle-scoped load path in HostSupport.
 
 ### FFGL traps
 
@@ -124,10 +136,17 @@ OpenFX examples:
   expected parameter table (group and page params dropped, ranges preserved,
   children grouped under the OFX group's label, choice elements in plugin order).
 
+- **The full GL path works.** `ffgltest` creates an offscreen CGL context
+  (GL 4.1 core, as Resolume uses), hands the wrapper a texture, and calls
+  `FF_INSTANTIATE_GL` / `FF_SET_PARAMETER` / `FF_PROCESS_OPENGL` exactly as a
+  host would. Invert inverts; Gain is identity by default and halves every
+  channel at `0=0.5`. That covers texture readback, OFX render, upload and blit
+  into the host FBO.
+
 Assumed / not yet done:
-- **Nothing has run inside Resolume.** The FFGL bundle has never been loaded by
-  the real host, and `ProcessOpenGL` has never executed — there is no GL context
-  in any test, so the readback/blit path is entirely unexercised.
+- **Nothing has run inside Resolume itself.** Every GL test uses our own
+  offscreen context, so Resolume's actual texture orientation, premultiplication
+  and resize behaviour are still unconfirmed.
 - Premultiplication is asserted, not verified against Resolume's actual output.
 - GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only, which means
   a full texture round trip per frame.

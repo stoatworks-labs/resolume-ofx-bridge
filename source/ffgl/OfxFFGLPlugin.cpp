@@ -113,7 +113,7 @@ OfxFFGLPlugin::~OfxFFGLPlugin()
 // GL lifecycle
 // ---------------------------------------------------------------------------
 
-FFResult OfxFFGLPlugin::InitGL( const FFGLViewportStruct* )
+FFResult OfxFFGLPlugin::InitGL( const FFGLViewportStruct* vp )
 {
 	if( !PluginContext::get().loaded )
 		return FF_FAIL;
@@ -121,7 +121,10 @@ FFResult OfxFFGLPlugin::InitGL( const FFGLViewportStruct* )
 	glGenFramebuffers( 1, &_readFbo );
 	glGenFramebuffers( 1, &_blitFbo );
 	glGenTextures( 1, &_blitTex );
-	return CFFGLPlugin::InitGL( nullptr );
+
+	// The base implementation dereferences vp unconditionally, so it must be
+	// forwarded rather than passed as null.
+	return vp != nullptr ? CFFGLPlugin::InitGL( vp ) : FF_SUCCESS;
 }
 
 FFResult OfxFFGLPlugin::DeInitGL()
@@ -162,6 +165,8 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 
 	_host = std::make_unique< ofxbridge::Host >();
 
+	// Note: this ends up loading every OFX bundle in the same directory, not just
+	// ours -- see the limitation noted in Catalog.cpp::createEffect.
 	std::string error;
 	_effect = ofxbridge::createEffect( *_host, ctx.manifest.bundlePath, ctx.manifest.identifier, error );
 	if( !_effect )
