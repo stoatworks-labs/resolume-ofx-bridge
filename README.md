@@ -58,7 +58,20 @@ binary plus a JSON manifest, which the plugin reads when the host loads it.
 
 ## Install
 
-Download the release for your platform, unzip, and run the generator:
+Download the release, unzip, and open **OFX Bridge.app**: choose a folder of OFX
+plugins (or a single `.ofx.bundle`), choose where to install, press Start.
+
+![The OFX Bridge window after a run](docs/demo-ui.png)
+
+The **Add to** buttons fill the destination in for whichever Resolume products
+are installed. Only Arena and Avenue are known to scan an `Extra Effects`
+folder — buttons appear for Alley and Wire because that is where they would look
+if support arrives, and clicking one says as much in the log.
+
+The app clears macOS quarantine from what it writes, which matters because a
+quarantined plugin makes Resolume skip it silently rather than prompt.
+
+### Or from the command line
 
 ```bash
 ./ofxgen generate --out ~/Documents/Resolume\ Arena/Extra\ Effects
@@ -72,10 +85,13 @@ scan somewhere else:
 ./ofxgen generate --dir /path/to/my/plugins --out ~/Documents/Resolume\ Arena/Extra\ Effects
 ```
 
+`--bundle /path/to/one.ofx.bundle` generates from a single plugin instead.
+
 Then rescan effects in Resolume.
 
-macOS builds are unsigned, and a quarantined plugin makes Resolume skip it rather
-than prompt. Clear the flag after copying:
+Both the app and the CLI strip `com.apple.quarantine` from what they write. If
+plugins still fail to appear after being copied around by something else, clear
+it by hand:
 
 ```bash
 xattr -dr com.apple.quarantine ~/Documents/Resolume\ Arena/Extra\ Effects
@@ -146,6 +162,7 @@ ranges survive intact.
 
 | | |
 |---|---|
+| `OFX Bridge.app` | the same generation with a window around it: pick, press Start, watch the log |
 | `ofxgen generate` | scan for OFX plugins and write FFGL bundles |
 | `ofxgen list` | show what was found, and why anything was skipped |
 | `ofxgen verify` | load a generated bundle as a host would and print what it advertises |

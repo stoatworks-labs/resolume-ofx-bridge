@@ -21,9 +21,11 @@ A clean machine has no OFX plugins, even with Resolve installed. Build some:
 ## The loop
 
 ```bash
+open "build/OFX Bridge.app"                                       # the app
 ./build/ofxprobe --dir build/test-plugins                         # what's there
 ./build/ofxprobe --dir build/test-plugins --render <id> --set k=v # CPU render
 ./build/ofxgen generate --dir build/test-plugins --out build/generated
+./build/ofxgen generate --bundle <one.ofx.bundle> --out DIR       # just one
 ./build/ofxgen verify build/generated/<Name>.bundle               # load as a host
 ./build/ffgltest build/generated/<Name>.bundle 0=0.5              # real GL
 ./build/ffgltest build/generated/<Name>.bundle --demo out.bmp     # demo image

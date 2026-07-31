@@ -5,6 +5,33 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **OFX Bridge.app** — a window around the generator, for people who would
+  rather not open a terminal. Choose a folder of OFX plugins or a single
+  `.ofx.bundle`, choose where to install, press Start; a progress bar tracks the
+  run and the log is the generator's own output, colour-coded. Cancel stops
+  between plugins, and Reveal in Finder opens the result.
+- **"Add to" buttons** fill in the `Extra Effects` folder for whichever Resolume
+  products are installed. Only Arena and Avenue are known to scan one; Alley and
+  Wire get a button and a caveat in the log rather than a silent no-op.
+- **`ofxgen generate --bundle PATH`** generates from one OFX bundle instead of a
+  whole directory — what the app's single-plugin selection uses.
+- **Quarantine is now cleared as part of generation** on macOS, by both the app
+  and the CLI. A quarantined plugin is skipped by Resolume silently, so this was
+  a manual `xattr -dr` step people had no reason to know about.
+
+### Changed
+
+- Scanning and copying moved out of the `ofxgen` CLI into `source/gen/Generator`,
+  so the app and the CLI produce bundles by the same code rather than by two
+  implementations that agree today. `ofxgen generate` now also prints the scan
+  log it previously discarded.
+- A plugin whose bundle cannot be copied is now counted as skipped and the run
+  continues, instead of aborting everything after it.
+
 ## [0.4.0] — 2026-07-31
 
 ### Added

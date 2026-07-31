@@ -77,6 +77,19 @@ Verified: correct effect type, a deterministic 4-character ID, and the expected
 parameter table (group and page dropped, ranges preserved, children grouped under
 the group's label, choice elements present and in the plugin's own order).
 
+### The app takes the same route
+
+`OFX Bridge.app` calls `ofxgen::generate`, the same function the CLI calls, so
+Level 3 covers both. Driven end to end against `build/test-plugins`, the app
+reported **6 generated, 1 skipped** — the same counts, the same skip reason and
+the same bundle names as `ofxgen generate` — and `ofxgen verify` on a bundle the
+*app* wrote printed the expected parameter table.
+
+What that does not cover: the app's quarantine clearing. A generated bundle
+carries no `com.apple.quarantine`, even when the wrapper template it was copied
+from has one, but the case that motivates the code — a downloaded app passing
+the flag to every file it writes — needs a downloaded build to reproduce.
+
 ## Level 4 — OpenGL
 
 ```bash

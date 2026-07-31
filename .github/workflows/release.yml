@@ -38,7 +38,8 @@ jobs:
         # CMake failure here, and the build log looks identical either way.
         run: |
           set -euo pipefail
-          for f in build/ofxgen build/ofxprobe build/ofxwrapper.bundle/Contents/MacOS/ofxwrapper; do
+          for f in build/ofxgen build/ofxprobe build/ofxwrapper.bundle/Contents/MacOS/ofxwrapper \
+                   "build/OFX Bridge.app/Contents/MacOS/OFX Bridge"; do
             archs=$(lipo -archs "$f")
             echo "$f: $archs"
             case "$archs" in
@@ -93,6 +94,9 @@ jobs:
           set -euo pipefail
           mkdir -p dist/resolume-ofx-bridge
           cp -R build/ofxwrapper.bundle dist/resolume-ofx-bridge/
+          # The app carries its own copy of the wrapper in Resources, so it works
+          # on its own; the loose one above is what the CLI uses.
+          cp -R "build/OFX Bridge.app" dist/resolume-ofx-bridge/
           cp build/ofxgen build/ofxprobe dist/resolume-ofx-bridge/
           cp README.md CHANGELOG.md LICENSE dist/resolume-ofx-bridge/
           cp -R docs dist/resolume-ofx-bridge/docs

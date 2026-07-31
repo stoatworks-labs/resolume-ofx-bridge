@@ -133,11 +133,61 @@ if( APPLE )
 endif()
 
 # ---------------------------------------------------------------------------
+# ofxgenlib - scan + copy, with no UI and no argv
+#
+# Shared by the CLI and the app so that "what a generated bundle contains" has
+# exactly one implementation.
+# ---------------------------------------------------------------------------
+add_library( ofxgenlib STATIC source/gen/Generator.cpp )
+target_include_directories( ofxgenlib PUBLIC source/gen )
+target_link_libraries( ofxgenlib PUBLIC ofxbridge )
+
+# ---------------------------------------------------------------------------
 # ofxgen - the generator CLI
 # ---------------------------------------------------------------------------
 add_executable( ofxgen source/gen/main.cpp )
-target_link_libraries( ofxgen PRIVATE ofxbridge )
+target_link_libraries( ofxgen PRIVATE ofxgenlib )
 add_dependencies( ofxgen ofxwrapper )
+
+# ---------------------------------------------------------------------------
+# OFX Bridge - the app
+#
+# A window around ofxgenlib: pick plugins, pick a destination, press Start. It
+# carries its own copy of the wrapper template in Resources, so a downloaded
+# .app generates bundles with nothing else installed.
+# ---------------------------------------------------------------------------
+if( APPLE )
+	add_executable( ofxgenui MACOSX_BUNDLE
+		source/ui/main.mm
+		source/ui/BridgeWindow.mm
+	)
+	set_target_properties( ofxgenui PROPERTIES
+		OUTPUT_NAME "OFX Bridge"
+		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/AppInfo.plist.in"
+		MACOSX_BUNDLE_BUNDLE_NAME "OFX Bridge"
+		MACOSX_BUNDLE_GUI_IDENTIFIER "com.stoatworks.ofxbridge.ui"
+		MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+		MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+	)
+	# ARC, so the AppKit objects the window controller holds are retained.
+	target_compile_options( ofxgenui PRIVATE -fobjc-arc )
+	target_link_libraries( ofxgenui PRIVATE ofxgenlib "-framework Cocoa" )
+
+	# Ship the wrapper template inside the app. Without this the app can still
+	# find a build-tree copy, but a distributed .app could not generate anything.
+	add_dependencies( ofxgenui ofxwrapper )
+	add_custom_command( TARGET ofxgenui POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E make_directory
+			"$<TARGET_BUNDLE_CONTENT_DIR:ofxgenui>/Resources"
+		COMMAND ${CMAKE_COMMAND} -E rm -rf
+			"$<TARGET_BUNDLE_CONTENT_DIR:ofxgenui>/Resources/ofxwrapper.bundle"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"$<TARGET_BUNDLE_DIR:ofxwrapper>"
+			"$<TARGET_BUNDLE_CONTENT_DIR:ofxgenui>/Resources/ofxwrapper.bundle"
+		COMMENT "Bundling the wrapper template into OFX Bridge.app"
+		VERBATIM
+	)
+endif()
 
 # ---------------------------------------------------------------------------
 # ffgltest - drive a generated bundle through a real GL context

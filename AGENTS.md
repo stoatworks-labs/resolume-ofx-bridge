@@ -52,7 +52,12 @@ system. Users do not need Xcode/MSVC.
   - `Params.{h,cpp}` — concrete param instances (HostSupport leaves these abstract)
   - `Catalog.{h,cpp}` — discovery, describe, manifest JSON
 - `source/ffgl/` — the generic FFGL wrapper (manifest, param mapping, GL bridge)
-- `source/gen/` — `ofxgen`, the generator + bundle verifier
+- `source/gen/` — `Generator.{h,cpp}` is the scan-and-copy step with no argv and
+  no UI; `main.cpp` is the `ofxgen` CLI around it, including the bundle verifier.
+  Anything that changes what a generated bundle *contains* belongs in the former,
+  or the app and the CLI drift apart.
+- `source/ui/` — `OFX Bridge.app`, a Cocoa window over `Generator`. AppKit only,
+  built by the same CMake; it holds no generation logic of its own.
 - `source/gltest/` — `ffgltest`, offscreen-GL harness for `ProcessOpenGL`
 - `source/probe/` — `ofxprobe` CLI
 - `external/openfx` — OFX headers + **HostSupport**, a BSD-3 host implementation
@@ -141,6 +146,22 @@ system. Users do not need Xcode/MSVC.
 lets an unrelated broken plugin misbehave mid-show. A proper fix needs a
 bundle-scoped load path in HostSupport.
 
+### App traps
+
+- **`PluginCache::addFileToPath()` is directory-scoped**, so "generate from this
+  one plugin" cannot be done by pointing the scanner at a `.ofx.bundle`. The
+  scanner takes the parent directory and `Options::onlyBundlePath` filters the
+  results — which means selecting one plugin still loads every plugin beside it.
+- **Quarantine is inherited from the writing process**, not copied from the
+  source file: a downloaded, still-quarantined `OFX Bridge.app` marks everything
+  it writes, and Resolume then skips those plugins silently. The generator clears
+  the attribute unconditionally, because that case cannot be reproduced from a
+  local build.
+- **Only Arena and Avenue scan `Extra Effects`.** `strings` finds that path in
+  the Arena binary and not in Alley's or Wire's, even though all three link the
+  same FFGL engine — so buttons for those two are offered with a caveat, not as
+  a promise.
+
 ### FFGL traps
 
 - **`FFInstanceID` is `void*`, not a 32-bit id.** Declaring `plugMain`'s third
@@ -190,7 +211,16 @@ OpenFX examples:
   channel at `0=0.5`. That covers texture readback, OFX render, upload and blit
   into the host FBO.
 
+- **The app generates what the CLI does.** Driven end to end on this machine
+  against `build/test-plugins`: 6 generated, 1 skipped — the same result as
+  `ofxgen generate` — and a bundle it wrote passes `ofxgen verify` with the
+  expected parameter table.
+
 Assumed / not yet done:
+- **The app's quarantine clearing is unproven in the case that matters.** A
+  generated bundle carries no `com.apple.quarantine`, including when the wrapper
+  template has one, but the real path — a downloaded app passing the flag to
+  files it writes — needs a signed-and-downloaded build to test.
 - **Nothing has run inside Resolume itself.** Every GL test uses our own
   offscreen context, so Resolume's actual texture orientation, premultiplication
   and resize behaviour are still unconfirmed.

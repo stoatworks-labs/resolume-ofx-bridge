@@ -6,12 +6,17 @@
 // that manifest when the host loads it. See source/ffgl/PluginMain.cpp.
 //
 //   ofxgen list    [--dir PATH]...
-//   ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only ID]
+//   ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only ID] [--bundle PATH]
 //   ofxgen verify  BUNDLE
 //
 // `verify` loads a generated bundle exactly as a host would and prints what it
 // advertises, so a bundle can be checked without launching Resolume.
 //
+// The scanning and copying live in Generator.{h,cpp} rather than here, so the
+// GUI drives the same code path this CLI does.
+//
+
+#include "Generator.h"
 
 #include "../ofxbridge/Catalog.h"
 
@@ -131,51 +136,8 @@ void usage()
 {
 	printf( "usage:\n"
 			"  ofxgen list     [--dir PATH]...\n"
-			"  ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only IDENTIFIER]\n"
+			"  ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only IDENTIFIER] [--bundle PATH]\n"
 			"  ofxgen verify   BUNDLE\n" );
-}
-
-/// Turn a plugin label into something safe for a filename.
-std::string sanitise( const std::string& in )
-{
-	std::string out;
-	for( char c : in )
-	{
-		if( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) || c == '-' || c == '_' )
-			out += c;
-		else if( c == ' ' || c == '.' || c == '/' || c == '\\' )
-			out += '_';
-	}
-	if( out.empty() )
-		out = "OfxPlugin";
-	return out;
-}
-
-/// Locate the prebuilt wrapper. Looked up next to the executable first so an
-/// installed copy works, then in the build tree for development.
-std::string findTemplate( const char* argv0 )
-{
-	std::vector< fs::path > candidates;
-	std::error_code ec;
-	const fs::path exe = fs::absolute( fs::path( argv0 ), ec );
-	const fs::path dir = exe.parent_path();
-
-#if defined( __APPLE__ )
-	const char* leaf = "ofxwrapper.bundle";
-#elif defined( _WIN32 )
-	const char* leaf = "ofxwrapper.dll";
-#else
-	const char* leaf = "libofxwrapper.so";
-#endif
-
-	candidates.push_back( dir / leaf );
-	candidates.push_back( dir / ".." / leaf );
-	candidates.push_back( fs::current_path( ec ) / "build" / leaf );
-
-	for( const auto& c : candidates )
-		if( fs::exists( c, ec ) )
-			return fs::weakly_canonical( c, ec ).string();
-	return std::string();
 }
 
 int doVerify( const std::string& bundlePath )
@@ -306,119 +268,6 @@ int doVerify( const std::string& bundlePath )
 #endif
 }
 
-int doGenerate( const std::vector< std::string >& dirs,
-				const std::string& outDir,
-				const std::string& templatePath,
-				const std::string& only )
-{
-	if( templatePath.empty() || !fs::exists( templatePath ) )
-	{
-		fprintf( stderr, "wrapper template not found. Build it first (cmake --build build --target ofxwrapper)\n"
-						 "or pass --template <path>.\n" );
-		return 1;
-	}
-
-	std::string log;
-	std::vector< ofxbridge::PluginDesc > plugins = ofxbridge::scanAndDescribe( dirs, log );
-
-	std::error_code ec;
-	fs::create_directories( outDir, ec );
-
-	int generated = 0;
-	int skipped   = 0;
-
-	for( const auto& p : plugins )
-	{
-		if( !only.empty() && p.identifier != only )
-			continue;
-		if( !p.error.empty() )
-		{
-			printf( "  skip  %s: %s\n", p.identifier.c_str(), p.error.c_str() );
-			++skipped;
-			continue;
-		}
-
-		const std::string name = sanitise( p.label.empty() ? p.identifier : p.label );
-
-#if defined( __APPLE__ )
-		const fs::path bundle    = fs::path( outDir ) / ( name + ".bundle" );
-		const fs::path contents  = bundle / "Contents";
-		const fs::path macosDir  = contents / "MacOS";
-		const fs::path resources = contents / "Resources";
-
-		fs::remove_all( bundle, ec );
-		fs::create_directories( macosDir, ec );
-		fs::create_directories( resources, ec );
-
-		// Copy the wrapper executable out of the template bundle, renaming it to
-		// match this bundle so CFBundleExecutable stays consistent.
-		fs::path templateExe;
-		for( const auto& e : fs::directory_iterator( fs::path( templatePath ) / "Contents" / "MacOS", ec ) )
-		{
-			templateExe = e.path();
-			break;
-		}
-		if( templateExe.empty() )
-		{
-			fprintf( stderr, "template bundle has no executable\n" );
-			return 1;
-		}
-
-		fs::copy_file( templateExe, macosDir / name, fs::copy_options::overwrite_existing, ec );
-		if( ec )
-		{
-			fprintf( stderr, "  fail  %s: %s\n", p.identifier.c_str(), ec.message().c_str() );
-			return 1;
-		}
-		fs::permissions( macosDir / name,
-						 fs::perms::owner_all | fs::perms::group_read | fs::perms::group_exec |
-							 fs::perms::others_read | fs::perms::others_exec,
-						 ec );
-
-		{
-			std::ofstream plist( contents / "Info.plist" );
-			plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-				  << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
-					 "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-				  << "<plist version=\"1.0\">\n<dict>\n"
-				  << "\t<key>CFBundleExecutable</key><string>" << name << "</string>\n"
-				  << "\t<key>CFBundleIdentifier</key><string>com.stoatworks.ffgl.ofx." << name << "</string>\n"
-				  << "\t<key>CFBundleName</key><string>" << name << "</string>\n"
-				  << "\t<key>CFBundlePackageType</key><string>BNDL</string>\n"
-				  << "\t<key>CFBundleShortVersionString</key><string>" << p.versionMajor << "." << p.versionMinor
-				  << "</string>\n"
-				  << "</dict>\n</plist>\n";
-		}
-
-		{
-			std::ofstream manifest( resources / "manifest.json" );
-			manifest << ofxbridge::toManifestJson( p );
-		}
-#else
-		// Windows and Linux: a bare shared library with a sidecar manifest.
-		const fs::path outFile = fs::path( outDir ) / ( name + fs::path( templatePath ).extension().string() );
-		fs::copy_file( templatePath, outFile, fs::copy_options::overwrite_existing, ec );
-		if( ec )
-		{
-			fprintf( stderr, "  fail  %s: %s\n", p.identifier.c_str(), ec.message().c_str() );
-			return 1;
-		}
-		{
-			std::ofstream manifest( fs::path( outDir ) / ( name + ".manifest.json" ) );
-			manifest << ofxbridge::toManifestJson( p );
-		}
-		const fs::path bundle = outFile;
-#endif
-
-		printf( "  built %s  <- %s (%zu param(s))\n", bundle.filename().string().c_str(), p.identifier.c_str(),
-				p.params.size() );
-		++generated;
-	}
-
-	printf( "\n%d generated, %d skipped, into %s\n", generated, skipped, outDir.c_str() );
-	return generated > 0 ? 0 : 1;
-}
-
 } // namespace
 
 int main( int argc, char** argv )
@@ -435,6 +284,7 @@ int main( int argc, char** argv )
 	std::string outDir;
 	std::string templatePath;
 	std::string only;
+	std::string onlyBundle;
 	std::string target;
 
 	for( int i = 2; i < argc; ++i )
@@ -448,6 +298,8 @@ int main( int argc, char** argv )
 			templatePath = argv[ ++i ];
 		else if( a == "--only" && i + 1 < argc )
 			only = argv[ ++i ];
+		else if( a == "--bundle" && i + 1 < argc )
+			onlyBundle = argv[ ++i ];
 		else if( a[ 0 ] != '-' )
 			target = a;
 		else
@@ -468,12 +320,11 @@ int main( int argc, char** argv )
 		return doVerify( target );
 	}
 
-	// list and generate both scan; only generate needs the conventional paths
-	// suppressed when the user names directories explicitly.
-	std::vector< std::string > searchPaths = dirs.empty() ? ofxbridge::defaultSearchPaths() : dirs;
-
 	if( command == "list" )
 	{
+		// Naming directories explicitly suppresses the conventional locations.
+		const std::vector< std::string > searchPaths = dirs.empty() ? ofxbridge::defaultSearchPaths() : dirs;
+
 		std::string log;
 		auto plugins = ofxbridge::scanAndDescribe( searchPaths, log );
 		fputs( log.c_str(), stderr );
@@ -490,9 +341,28 @@ int main( int argc, char** argv )
 			fprintf( stderr, "generate needs --out DIR\n" );
 			return 2;
 		}
-		if( templatePath.empty() )
-			templatePath = findTemplate( argv[ 0 ] );
-		return doGenerate( searchPaths, outDir, templatePath, only );
+
+		ofxgen::Options options;
+		options.searchPaths    = dirs;// empty means the conventional locations
+		options.outDir         = outDir;
+		options.templatePath   = templatePath.empty() ? ofxgen::findTemplate( argv[ 0 ] ) : templatePath;
+		options.onlyIdentifier = only;
+		options.onlyBundlePath = onlyBundle;
+
+		const ofxgen::Result result = ofxgen::generate(
+			options,
+			[]( const std::string& line ) { printf( "%s\n", line.c_str() ); },
+			nullptr,
+			nullptr );
+
+		if( !result.error.empty() )
+		{
+			fprintf( stderr, "%s\n", result.error.c_str() );
+			return 1;
+		}
+
+		printf( "\n%d generated, %d skipped, into %s\n", result.generated, result.skipped, outDir.c_str() );
+		return result.generated > 0 ? 0 : 1;
 	}
 
 	usage();
