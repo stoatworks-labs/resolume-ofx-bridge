@@ -47,5 +47,5 @@ Tag-triggered; `.github/workflows/release.yml` builds macOS universal only
 (Windows/Linux paths exist but have never been compiled).
 
 ```bash
-git tag -a v0.1.0 -m "..." && git push origin v0.1.0
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z   # latest released: v0.5.1
 ```
