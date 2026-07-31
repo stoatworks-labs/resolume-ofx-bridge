@@ -65,6 +65,21 @@ NSString* extraEffectsPath( NSString* product )
 		stringByAppendingPathComponent:[NSString stringWithFormat:@"Documents/Resolume %@/Extra Effects", product]];
 }
 
+/// Paths are shown with `~` for the home directory, as the rest of macOS does.
+/// The field and the log are read over people's shoulders and appear in
+/// screenshots, and the account name is nobody else's business.
+NSString* forDisplay( NSString* path )
+{
+	return [path stringByAbbreviatingWithTildeInPath];
+}
+
+/// The inverse, applied to whatever is in a field before it is used. Typing a
+/// `~` path by hand has to work too, so this is not merely undoing the above.
+NSString* forUse( NSString* path )
+{
+	return [path stringByExpandingTildeInPath];
+}
+
 NSTextField* makeLabel( NSString* text )
 {
 	NSTextField* label                              = [NSTextField labelWithString:text];
@@ -294,7 +309,7 @@ NSTextField* makeLabel( NSString* text )
 	panel.prompt                 = @"Select";
 
 	if( [panel runModal] == NSModalResponseOK )
-		self.sourceField.stringValue = panel.URL.path;
+		self.sourceField.stringValue = forDisplay( panel.URL.path );
 }
 
 - ( void )useDefaultLocations:( id )sender
@@ -317,7 +332,7 @@ NSTextField* makeLabel( NSString* text )
 	panel.prompt                    = @"Select";
 
 	if( [panel runModal] == NSModalResponseOK )
-		self.destField.stringValue = panel.URL.path;
+		self.destField.stringValue = forDisplay( panel.URL.path );
 }
 
 - ( void )useQuickDestination:( NSButton* )sender
@@ -325,7 +340,7 @@ NSTextField* makeLabel( NSString* text )
 	if( sender.tag < 0 || (NSUInteger)sender.tag >= self.quickDestinations.count )
 		return;
 
-	NSString* path             = self.quickDestinations[ (NSUInteger)sender.tag ];
+	NSString* path             = forDisplay( self.quickDestinations[ (NSUInteger)sender.tag ] );
 	self.destField.stringValue = path;
 	[self appendLine:[NSString stringWithFormat:@"Destination: %@", path] kind:LogKind::Info];
 
@@ -341,7 +356,7 @@ NSTextField* makeLabel( NSString* text )
 {
 	NSString* dest = self.destField.stringValue;
 	if( dest.length > 0 )
-		[[NSWorkspace sharedWorkspace] selectFile:nil inFileViewerRootedAtPath:dest];
+		[[NSWorkspace sharedWorkspace] selectFile:nil inFileViewerRootedAtPath:forUse( dest )];
 }
 
 - ( void )cancel:( id )sender
@@ -380,19 +395,24 @@ NSTextField* makeLabel( NSString* text )
 	[[NSUserDefaults standardUserDefaults] setObject:source forKey:kDefaultsSource];
 	[[NSUserDefaults standardUserDefaults] setObject:dest forKey:kDefaultsDest];
 
+	// The fields hold display paths, which may be `~`-relative; everything below
+	// this line works in real ones.
+	NSString* sourcePath = source.length > 0 ? forUse( source ) : @"";
+	NSString* destPath   = forUse( dest );
+
 	ofxgen::Options options;
-	options.outDir       = dest.UTF8String;
+	options.outDir       = destPath.UTF8String;
 	options.templatePath = templatePath.UTF8String;
 
-	if( source.length > 0 )
+	if( sourcePath.length > 0 )
 	{
 		// A .ofx.bundle is a directory, so the open panel hands one back like any
 		// other folder. Scanning it directly finds nothing (the OFX search path is
 		// directory-scoped), so it becomes a filter instead.
-		if( [source hasSuffix:@".ofx.bundle"] || [source hasSuffix:@".ofx"] )
-			options.onlyBundlePath = source.UTF8String;
+		if( [sourcePath hasSuffix:@".ofx.bundle"] || [sourcePath hasSuffix:@".ofx"] )
+			options.onlyBundlePath = sourcePath.UTF8String;
 		else
-			options.searchPaths = { std::string( source.UTF8String ) };
+			options.searchPaths = { std::string( sourcePath.UTF8String ) };
 	}
 
 	[self appendLine:@"" kind:LogKind::Info];

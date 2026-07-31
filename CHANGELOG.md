@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-07-31
+
+### Changed
+
+- **Paths are shown with `~` for the home directory**, as the rest of macOS
+  does — in both fields and in the app's own log lines. The window is read over
+  shoulders, screenshotted and filmed; the account name does not need to be in
+  any of that. Typing a `~` path by hand works too.
+
 ## [0.5.0] — 2026-07-31
 
 ### Added
@@ -171,6 +180,7 @@ harnesses in this repo, but never loaded into Resolume itself.
 - `createEffect` loads every bundle in the target's directory, because
   HostSupport's `addFileToPath` is directory-scoped.
 
+[0.5.1]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.5.1
 [0.5.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.5.0
 [0.4.0]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.4.0
 [0.3.1]: https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.3.1
