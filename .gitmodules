@@ -1,0 +1,6 @@
+[submodule "external/ffgl"]
+	path = external/ffgl
+	url = https://github.com/resolume/ffgl.git
+[submodule "external/openfx"]
+	path = external/openfx
+	url = https://github.com/AcademySoftwareFoundation/openfx.git
