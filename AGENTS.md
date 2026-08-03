@@ -235,3 +235,30 @@ Assumed / not yet done:
 - Windows and Linux are untried; `ofxgen verify` is macOS/Linux only.
 - CUDA is written but never compiled or run (no NVIDIA hardware).
 - No generator GUI yet.
+
+## Parameter edits are actions, not just values
+
+Since the preset work (2026-08-03) the host delivers `kOfxActionInstanceChanged`
+the way a real UI does, and that changed the parameter flow in three ways worth
+knowing before touching `applyParams()`:
+
+- **Only changed values cross per frame.** The FFGL layer keeps a dirty flag per
+  slot; pushing every value every frame (the old behaviour) would overwrite
+  values the plugin set on itself — a preset choice filling in the sliders is
+  exactly that. After the push, each changed param gets `instanceChanged` with
+  `kOfxChangeUserEdited`, bracketed by begin/end.
+- **The first push is setup, not an edit** — except for values that already
+  differ from their declared defaults, which happens when the operator (or
+  `ffgltest`) set a param before the first frame rendered. Those are delivered
+  as edits, or a preset picked before playback would be silently swallowed.
+- **Plugin-initiated changes flow back.** HostSupport routes a plugin's own
+  `paramSetValue` to `Effect::paramChangedByPlugin`, which the FFGL layer hooks
+  to refresh its copy (so the per-frame push does not undo it) and raise
+  `FF_EVENT_FLAG_VALUE` so Resolume re-reads the control. A host that ignores
+  the event still renders correctly and merely shows a stale knob.
+
+`ofxprobe` grew `--edit name=value` alongside `--set`: `--set` writes the value
+store silently (what project load looks like), `--edit` delivers a user edit
+with the action (what the inspector looks like). Behaviour a plugin hangs off
+`changedParam` — presets — only runs under `--edit`. Both accept comma lists
+for multi-component params (`--set colour=1,0.72,0.2`).

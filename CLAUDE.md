@@ -24,6 +24,7 @@ A clean machine has no OFX plugins, even with Resolve installed. Build some:
 open "build/OFX Bridge.app"                                       # the app
 ./build/ofxprobe --dir build/test-plugins                         # what's there
 ./build/ofxprobe --dir build/test-plugins --render <id> --set k=v # CPU render
+./build/ofxprobe --dir DIR --render <id> --edit preset=2          # a real user edit: fires instanceChanged (presets)
 ./build/ofxprobe --dir DIR --render <id> --size 640x360 --out out.bmp # input|output image
 ./build/ofxgen generate --dir build/test-plugins --out build/generated
 ./build/ofxgen generate --bundle <one.ofx.bundle> --out DIR       # just one

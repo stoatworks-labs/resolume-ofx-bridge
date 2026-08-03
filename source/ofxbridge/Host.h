@@ -22,6 +22,7 @@
 #include "ofxhInteract.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -227,6 +228,20 @@ public:
 	/// stale manifest can't take the effect down mid-show.
 	bool setParamValue( const std::string& name, const std::vector< double >& values );
 	bool setParamString( const std::string& name, const std::string& value );
+
+	/// Read a numeric parameter back by OFX name.
+	bool getParamValue( const std::string& name, std::vector< double >& values );
+
+	/// setParamValue plus the kOfxActionInstanceChanged round a real host sends
+	/// for a user edit. A bare setParamValue is invisible to the plugin, so
+	/// anything the plugin drives off its own params — a preset choice writing
+	/// the sliders, say — only happens through this path.
+	bool editParamValue( const std::string& name, const std::vector< double >& values );
+
+	/// Fired when the PLUGIN sets one of its own params (HostSupport routes
+	/// paramSetValue here via paramChangedByPlugin). The FFGL layer uses it to
+	/// keep its value table fresh and tell Resolume to re-read.
+	std::function< void( const std::string& paramName ) > onParamChangedByPlugin;
 
 	const std::string& getDefaultOutputFielding() const override;
 

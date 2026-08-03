@@ -11,6 +11,9 @@
 //   ofxprobe --manifest <id>       emit the manifest for one plugin identifier
 //   ofxprobe --render <id>         instantiate and render one frame (CPU)
 //   ofxprobe --set name=value      set an OFX parameter before rendering (repeatable)
+//   ofxprobe --edit name=value     like --set, but delivered as a user edit with
+//                                  kOfxActionInstanceChanged, so param-driven
+//                                  behaviour (presets) actually runs (repeatable)
 //
 
 #include "../ofxbridge/Catalog.h"
@@ -27,10 +30,26 @@
 
 namespace {
 
+/// "0.5" or "1,0.72,0.2" — multi-component params take a comma list.
+std::vector< double > parseValues( const char* text )
+{
+	std::vector< double > values;
+	const char* p = text;
+	char* end     = nullptr;
+	for( ;; )
+	{
+		values.push_back( strtod( p, &end ) );
+		if( end == nullptr || *end != ',' )
+			break;
+		p = end + 1;
+	}
+	return values;
+}
+
 void usage()
 {
 	printf( "usage: ofxprobe [--dir PATH]... [--json] [--manifest IDENTIFIER] [--render IDENTIFIER]\n"
-			"                [--size WxH] [--out FILE.bmp] [--quiet]\n" );
+			"                [--set name=value]... [--edit name=value]... [--size WxH] [--out FILE.bmp] [--quiet]\n" );
 }
 
 void put32( std::vector< uint8_t >& v, uint32_t x )
@@ -110,7 +129,8 @@ bool writeComparisonBmp( const std::string& path,
 /// render failure can be attributed without involving Resolume or a GPU.
 int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 				const std::string& identifier,
-				const std::vector< std::pair< std::string, double > >& overrides,
+				const std::vector< std::pair< std::string, std::vector< double > > >& overrides,
+				const std::vector< std::pair< std::string, std::vector< double > > >& edits,
 				int width, int height,
 				const std::string& outPath )
 {
@@ -149,12 +169,44 @@ int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 		return 1;
 	}
 
+	auto printValues = []( const std::vector< double >& v ) {
+		for( size_t i = 0; i < v.size(); ++i )
+			printf( "%s%g", i ? "," : "", v[ i ] );
+	};
+
 	// Setting parameters here proves the same path the FFGL wrapper uses:
 	// Effect::setParamValue -> the concrete param instance -> what render sees.
 	for( const auto& kv : overrides )
 	{
-		if( effect->setParamValue( kv.first, { kv.second } ) )
-			printf( "  set %s = %g\n", kv.first.c_str(), kv.second );
+		if( effect->setParamValue( kv.first, kv.second ) )
+		{
+			printf( "  set %s = ", kv.first.c_str() );
+			printValues( kv.second );
+			printf( "\n" );
+		}
+		else
+			fprintf( stderr, "  WARNING: no numeric parameter named '%s'\n", kv.first.c_str() );
+	}
+
+	// Edits go through kOfxActionInstanceChanged as well, the way a host UI
+	// would deliver them, so behaviour a plugin hangs off changedParam — a
+	// preset choice writing the other params — actually runs. Anything the
+	// plugin writes back is reported, because that is usually the point.
+	effect->onParamChangedByPlugin = [ & ]( const std::string& name ) {
+		std::vector< double > v;
+		if( effect->getParamValue( name, v ) && !v.empty() )
+			printf( "  plugin set %s = %g\n", name.c_str(), v[ 0 ] );
+		else
+			printf( "  plugin set %s\n", name.c_str() );
+	};
+	for( const auto& kv : edits )
+	{
+		if( effect->editParamValue( kv.first, kv.second ) )
+		{
+			printf( "  edit %s = ", kv.first.c_str() );
+			printValues( kv.second );
+			printf( "\n" );
+		}
 		else
 			fprintf( stderr, "  WARNING: no numeric parameter named '%s'\n", kv.first.c_str() );
 	}
@@ -229,7 +281,8 @@ int main( int argc, char** argv )
 	bool quiet     = false;
 	std::string wantManifestFor;
 	std::string wantRenderFor;
-	std::vector< std::pair< std::string, double > > overrides;
+	std::vector< std::pair< std::string, std::vector< double > > > overrides;
+	std::vector< std::pair< std::string, std::vector< double > > > edits;
 	int renderWidth  = 64;
 	int renderHeight = 32;
 	std::string outPath;
@@ -256,7 +309,18 @@ int main( int argc, char** argv )
 				fprintf( stderr, "--set expects name=value, got '%s'\n", kv.c_str() );
 				return 2;
 			}
-			overrides.emplace_back( kv.substr( 0, eq ), atof( kv.c_str() + eq + 1 ) );
+			overrides.emplace_back( kv.substr( 0, eq ), parseValues( kv.c_str() + eq + 1 ) );
+		}
+		else if( a == "--edit" && i + 1 < argc )
+		{
+			const std::string kv = argv[ ++i ];
+			const size_t eq      = kv.find( '=' );
+			if( eq == std::string::npos )
+			{
+				fprintf( stderr, "--edit expects name=value, got '%s'\n", kv.c_str() );
+				return 2;
+			}
+			edits.emplace_back( kv.substr( 0, eq ), parseValues( kv.c_str() + eq + 1 ) );
 		}
 		else if( a == "--size" && i + 1 < argc )
 		{
@@ -294,7 +358,7 @@ int main( int argc, char** argv )
 		fputs( log.c_str(), stderr );
 
 	if( !wantRenderFor.empty() )
-		return renderTest( plugins, wantRenderFor, overrides, renderWidth, renderHeight, outPath );
+		return renderTest( plugins, wantRenderFor, overrides, edits, renderWidth, renderHeight, outPath );
 
 	if( !wantManifestFor.empty() )
 	{

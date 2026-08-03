@@ -64,10 +64,17 @@ private:
 	bool ensureEffect( int width, int height );
 	void destroyEffect();
 
-	/// Push every FFGL parameter value into the OFX instance. Called before each
-	/// render; cheap compared with the pixel round trip and avoids having to
-	/// track which values Resolume changed.
+	/// Push the FFGL parameter values Resolume changed into the OFX instance,
+	/// then deliver kOfxActionInstanceChanged for them the way a real host
+	/// would. Called before each render. Only *changed* values cross: pushing
+	/// everything every frame would overwrite values the plugin set on itself
+	/// (a preset choice filling in the sliders).
 	void applyParams();
+
+	/// The plugin changed one of its own params. Refresh our copy so the
+	/// per-frame push does not undo it, and raise FF_EVENT_FLAG_VALUE so
+	/// Resolume re-reads the control.
+	void syncParamFromOfx( const std::string& ofxName );
 
 	/// True when both the plugin and we can take the GL texture path, so no pixel
 	/// crosses to the CPU.
@@ -117,6 +124,11 @@ private:
 
 	std::vector< float > _values;
 	std::vector< std::string > _textValues;
+	/// Which of _values changed since the last applyParams().
+	std::vector< bool > _dirty;
+	/// The first push after (re)instantiation is setup, not a user edit, so it
+	/// gets no instanceChanged action.
+	bool _pushedOnce = false;
 
 	GLuint _readFbo   = 0;
 	GLuint _blitFbo   = 0;

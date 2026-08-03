@@ -62,6 +62,7 @@ OfxFFGLPlugin::OfxFFGLPlugin()
 
 	_values.resize( ctx.params.size(), 0.0f );
 	_textValues.resize( ctx.params.size() );
+	_dirty.resize( ctx.params.size(), true );
 
 	for( size_t i = 0; i < ctx.params.size(); ++i )
 	{
@@ -211,6 +212,13 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 		return false;
 	}
 
+	// A fresh instance holds only defaults: everything must be pushed once,
+	// silently (setup is not a user edit). And when the plugin drives its own
+	// params — a preset choice filling in the sliders — our copy follows.
+	std::fill( _dirty.begin(), _dirty.end(), true );
+	_pushedOnce                     = false;
+	_effect->onParamChangedByPlugin = [ this ]( const std::string& name ) { syncParamFromOfx( name ); };
+
 	// Bring Metal up before deciding the path: useMetalPath() depends on it.
 	if( PluginContext::get().manifest.supportsMetalRender && !_metalReady && !_metalFailed )
 	{
@@ -331,7 +339,11 @@ FFResult OfxFFGLPlugin::SetFloatParameter( unsigned int index, float value )
 
 	if( index >= _values.size() )
 		return FF_FAIL;
-	_values[ index ] = value;
+	if( _values[ index ] != value )
+	{
+		_values[ index ] = value;
+		_dirty[ index ]  = true;
+	}
 	return FF_SUCCESS;
 }
 
@@ -376,15 +388,31 @@ void OfxFFGLPlugin::applyParams()
 	const PluginContext& ctx = PluginContext::get();
 
 	// Multi-component OFX params are spread across several FFGL slots, so gather
-	// each one's components before pushing it across.
+	// each one's components before pushing it across. Only params with a dirty
+	// slot are pushed: unconditionally pushing every value each frame would
+	// overwrite values the plugin set on itself (a preset filling in sliders).
+	// On the first push everything crosses, but only values that already
+	// differ from their declared default count as *edits*: the defaults
+	// arriving is instance setup, while a preset picked before the first
+	// frame rendered is an edit that must still reach changedParam.
+	const bool firstPush = !_pushedOnce;
+
 	std::string pending;
 	std::vector< double > components;
+	bool pendingDirty  = false;
+	bool pendingEdited = false;
+	std::vector< std::string > changed;
 
 	auto flush = [ & ]() {
-		if( !pending.empty() && !components.empty() )
-			_effect->setParamValue( pending, components );
+		if( !pending.empty() && !components.empty() && pendingDirty )
+		{
+			if( _effect->setParamValue( pending, components ) && pendingEdited )
+				changed.push_back( pending );
+		}
 		pending.clear();
 		components.clear();
+		pendingDirty  = false;
+		pendingEdited = false;
 	};
 
 	for( size_t i = 0; i < ctx.params.size() && i < _values.size(); ++i )
@@ -410,8 +438,59 @@ void OfxFFGLPlugin::applyParams()
 		if( (int)components.size() <= p.component )
 			components.resize( p.component + 1, 0.0 );
 		components[ p.component ] = (double)_values[ i ];
+		if( _dirty[ i ] )
+		{
+			pendingDirty = true;
+			_dirty[ i ]  = false;
+			if( !firstPush || _values[ i ] != p.defaultValue )
+				pendingEdited = true;
+		}
 	}
 	flush();
+
+	// A real host follows a user edit with kOfxActionInstanceChanged, and that
+	// is where param-driven behaviour lives — a preset dropdown does its work
+	// in changedParam, not in the value store.
+	_pushedOnce = true;
+	if( changed.empty() )
+		return;
+
+	OfxPointD renderScale = { 1.0, 1.0 };
+	_effect->beginInstanceChangedAction( kOfxChangeUserEdited );
+	for( const std::string& name : changed )
+		_effect->paramInstanceChangedAction( name, kOfxChangeUserEdited, _time, renderScale );
+	_effect->endInstanceChangedAction( kOfxChangeUserEdited );
+}
+
+void OfxFFGLPlugin::syncParamFromOfx( const std::string& ofxName )
+{
+	if( !_effect )
+		return;
+
+	std::vector< double > values;
+	if( !_effect->getParamValue( ofxName, values ) )
+		return;
+
+	const PluginContext& ctx = PluginContext::get();
+	for( size_t i = 0; i < ctx.params.size() && i < _values.size(); ++i )
+	{
+		const FfglParam& p = ctx.params[ i ];
+		if( p.ofxName != ofxName || p.isText || p.ffglType == FF_TYPE_EVENT )
+			continue;
+		if( p.component < 0 || p.component >= (int)values.size() )
+			continue;
+
+		const float v = (float)values[ p.component ];
+		if( _values[ i ] != v )
+		{
+			_values[ i ] = v;
+			// Resolume re-reads the control on this event; a host that ignores
+			// it still renders correctly and merely shows a stale knob.
+			RaiseParamEvent( (unsigned int)i, FF_EVENT_FLAG_VALUE );
+		}
+		// Whatever the OFX side holds is now the truth; don't push ours back.
+		_dirty[ i ] = false;
+	}
 }
 
 // ---------------------------------------------------------------------------

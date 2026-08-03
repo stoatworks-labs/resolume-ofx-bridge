@@ -665,10 +665,12 @@ OfxStatus Effect::editEnd()
 
 void Effect::paramChangedByPlugin( OFX::Host::Param::Instance* param )
 {
-	// A plugin may drive one param from another (a preset choice setting sliders,
-	// say). We have nothing to sync eagerly: the FFGL layer re-reads values it
-	// cares about, and Resolume owns the UI copy.
-	(void)param;
+	// A plugin may drive one param from another (a preset choice setting the
+	// sliders, say). The value is already stored by the time HostSupport calls
+	// this; what remains is telling whoever fronts this effect that their copy
+	// of it is now stale.
+	if( onParamChangedByPlugin && param != nullptr )
+		onParamChangedByPlugin( param->getName() );
 }
 
 bool Effect::setParamValue( const std::string& name, const std::vector< double >& values )
@@ -680,6 +682,30 @@ bool Effect::setParamValue( const std::string& name, const std::vector< double >
 	if( v == nullptr || v->componentCount() == 0 )
 		return false;
 	v->setValues( values );
+	return true;
+}
+
+bool Effect::getParamValue( const std::string& name, std::vector< double >& values )
+{
+	OFX::Host::Param::Instance* p = getParam( name );
+	if( p == nullptr )
+		return false;
+	ValueAccess* v = dynamic_cast< ValueAccess* >( p );
+	if( v == nullptr || v->componentCount() == 0 )
+		return false;
+	v->getValues( values );
+	return true;
+}
+
+bool Effect::editParamValue( const std::string& name, const std::vector< double >& values )
+{
+	if( !setParamValue( name, values ) )
+		return false;
+
+	OfxPointD renderScale = { 1.0, 1.0 };
+	beginInstanceChangedAction( kOfxChangeUserEdited );
+	paramInstanceChangedAction( name, kOfxChangeUserEdited, 0.0, renderScale );
+	endInstanceChangedAction( kOfxChangeUserEdited );
 	return true;
 }
 
