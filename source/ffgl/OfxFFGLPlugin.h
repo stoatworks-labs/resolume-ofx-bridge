@@ -13,6 +13,8 @@
 
 #include "FFGLSDK.h"
 
+#include "../StoatworksAboutParams.h"
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -106,6 +108,13 @@ private:
 	std::unique_ptr< ofxbridge::Frame > _output;
 
 	/// Current FFGL parameter values, indexed as the param table.
+	/// Where the About block starts. The OFX plugin's own parameters come
+	/// first and there is no compile-time count of them, so this is the one
+	/// FFGL param base in the fleet that is worked out at construction.
+	unsigned int _aboutBase = 0;
+	/// GetTextParameter hands the host a bare pointer, so this outlives the call.
+	std::string _aboutText;
+
 	std::vector< float > _values;
 	std::vector< std::string > _textValues;
 

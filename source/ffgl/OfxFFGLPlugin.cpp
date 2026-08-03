@@ -104,6 +104,17 @@ OfxFFGLPlugin::OfxFFGLPlugin()
 		if( !p.visible )
 			SetParamVisibility( id, false, false );
 	}
+
+	// The About block, after the OFX plugin's own parameters. FFGL has no
+	// window, so the name, the version and the links are parameters the host
+	// draws. See ../StoatworksAboutParams.h.
+	_aboutBase = (unsigned int)ctx.params.size();
+	SetParamInfo( _aboutBase, "About", FF_TYPE_TEXT, "" );
+	{
+		unsigned int aboutId = _aboutBase + 1;
+		for( const auto& b : stoatworks::about::buttons() )
+			SetParamInfo( aboutId++, b.label, FF_TYPE_EVENT, false );
+	}
 }
 
 OfxFFGLPlugin::~OfxFFGLPlugin()
@@ -302,6 +313,11 @@ void OfxFFGLPlugin::destroyEffect()
 
 FFResult OfxFFGLPlugin::SetFloatParameter( unsigned int index, float value )
 {
+	// An About button is a press, not a value to keep: it opens a browser and
+	// nothing about the effect changes.
+	if( index >= _aboutBase )
+		return stoatworks::about::handleParam( index - _aboutBase, value ) ? FF_SUCCESS : FF_FAIL;
+
 	if( index >= _values.size() )
 		return FF_FAIL;
 	_values[ index ] = value;
@@ -323,6 +339,12 @@ FFResult OfxFFGLPlugin::SetTextParameter( unsigned int index, const char* value 
 
 char* OfxFFGLPlugin::GetTextParameter( unsigned int index )
 {
+	if( index == _aboutBase )
+	{
+		_aboutText = stoatworks::about::textParam( 0 );
+		return const_cast< char* >( _aboutText.c_str() );
+	}
+
 	if( index >= _textValues.size() )
 		return nullptr;
 	return const_cast< char* >( _textValues[ index ].c_str() );
