@@ -278,3 +278,211 @@ Result generate( const Options& options, const LogFn& log, const ProgressFn& pro
 }
 
 } // namespace ofxgen
+
+// ---------------------------------------------------------------------------
+// FFGL -> OFX. The same philosophy as the other direction: a copy, not a
+// compile. The output bundle is the prebuilt shell binary, a manifest the
+// shell configures itself from at load time, and the untouched guest bundle
+// carried inside Contents/Guest so the output is self-contained.
+// ---------------------------------------------------------------------------
+
+#if OFXGEN_HAS_FFGL_GUEST
+
+#include "FfglGuest.h"
+
+namespace ofxgen {
+
+namespace {
+
+std::string jsonEscape( const std::string& in )
+{
+	std::string out;
+	out.reserve( in.size() + 8 );
+	for( char c : in )
+	{
+		switch( c )
+		{
+		case '"': out += "\\\""; break;
+		case '\\': out += "\\\\"; break;
+		case '\n': out += "\\n"; break;
+		case '\r': out += "\\r"; break;
+		case '\t': out += "\\t"; break;
+		default:
+			if( (unsigned char)c < 0x20 )
+			{
+				char buf[ 8 ];
+				snprintf( buf, sizeof( buf ), "\\u%04x", c );
+				out += buf;
+			}
+			else
+				out += c;
+		}
+	}
+	return out;
+}
+
+std::string ffglManifestJson( const ffglguest::GuestInfo& info, const std::string& identifier,
+							  const std::string& guestLeaf )
+{
+	std::string o;
+	o += "{\n";
+	o += "  \"manifestVersion\": 2,\n";
+	o += "  \"guestType\": \"ffgl\",\n";
+	o += "  \"identifier\": \"" + jsonEscape( identifier ) + "\",\n";
+	o += "  \"label\": \"" + jsonEscape( info.name + " (FFGL)" ) + "\",\n";
+	o += "  \"grouping\": \"FFGL\",\n";
+	o += "  \"guestBundle\": \"Guest/" + jsonEscape( guestLeaf ) + "\",\n";
+	o += std::string( "  \"isSource\": " ) + ( info.pluginType == FF_SOURCE ? "true" : "false" ) + ",\n";
+	o += "  \"versionMajor\": 1,\n";
+	o += "  \"versionMinor\": 0,\n";
+	o += "  \"params\": [\n";
+	for( size_t i = 0; i < info.params.size(); ++i )
+	{
+		const ffglguest::GuestParam& p = info.params[ i ];
+		o += "    {\"index\": " + std::to_string( p.index );
+		o += ", \"name\": \"" + jsonEscape( p.name ) + "\"";
+		o += ", \"type\": " + std::to_string( p.type );
+		o += ", \"default\": " + std::to_string( p.defaultValue );
+		o += ", \"min\": " + std::to_string( p.rangeMin );
+		o += ", \"max\": " + std::to_string( p.rangeMax );
+		if( !p.textDefault.empty() )
+			o += ", \"textDefault\": \"" + jsonEscape( p.textDefault ) + "\"";
+		if( !p.group.empty() )
+			o += ", \"group\": \"" + jsonEscape( p.group ) + "\"";
+		if( !p.elements.empty() )
+		{
+			o += ", \"elements\": [";
+			for( size_t e = 0; e < p.elements.size(); ++e )
+				o += ( e ? "," : "" ) + std::string( "\"" ) + jsonEscape( p.elements[ e ] ) + "\"";
+			o += "], \"elementValues\": [";
+			for( size_t e = 0; e < p.elementValues.size(); ++e )
+				o += ( e ? "," : "" ) + std::to_string( p.elementValues[ e ] );
+			o += "]";
+		}
+		o += "}";
+		o += ( i + 1 < info.params.size() ) ? ",\n" : "\n";
+	}
+	o += "  ]\n";
+	o += "}\n";
+	return o;
+}
+
+} // namespace
+
+std::string findOfxShell( const std::string& executablePath )
+{
+	std::error_code ec;
+	const fs::path exe = fs::absolute( fs::path( executablePath ), ec );
+	const fs::path dir = exe.parent_path();
+
+	const char* leaf = "ffglofxshell.ofx";
+
+	std::vector< fs::path > candidates;
+	candidates.push_back( dir / leaf );
+	candidates.push_back( dir / ".." / leaf );
+	candidates.push_back( dir / ".." / "Resources" / leaf );
+	candidates.push_back( fs::current_path( ec ) / "build" / leaf );
+
+	for( const auto& c : candidates )
+		if( fs::exists( c, ec ) )
+			return fs::weakly_canonical( c, ec ).string();
+	return std::string();
+}
+
+Result wrapFfgl( const WrapFfglOptions& options, const LogFn& log )
+{
+	Result result;
+	std::error_code ec;
+
+	if( options.shellPath.empty() || !fs::exists( options.shellPath, ec ) )
+	{
+		result.error = "OFX shell not found. Build it first "
+					   "(cmake --build build --target ffglofxshell), or pass one explicitly.";
+		return result;
+	}
+	if( options.outDir.empty() )
+	{
+		result.error = "no output directory";
+		return result;
+	}
+	fs::create_directories( options.outDir, ec );
+
+	for( const std::string& bundlePath : options.bundles )
+	{
+		std::string error;
+		ffglguest::GuestInfo info;
+		if( !ffglguest::describe( bundlePath, info, error ) )
+		{
+			if( log )
+				log( "  SKIP " + bundlePath + ": " + error );
+			++result.skipped;
+			continue;
+		}
+
+		const std::string safe       = sanitise( info.name );
+		const std::string identifier = "com.stoatworks.ffglwrap." + [ & ] {
+			std::string s;
+			for( char c : safe )
+				s += (char)tolower( (unsigned char)c );
+			return s;
+		}();
+
+		// "_FFGL" in the bundle name so a wrapped Tinsel and a native OFX
+		// Tinsel can share /Library/OFX/Plugins without colliding.
+		const fs::path out = fs::path( options.outDir ) / ( safe + "_FFGL.ofx.bundle" );
+		fs::remove_all( out, ec );
+		fs::create_directories( out / "Contents" / "MacOS", ec );
+		fs::create_directories( out / "Contents" / "Guest", ec );
+
+		const std::string binaryName = safe + "_FFGL.ofx";
+		fs::copy_file( options.shellPath, out / "Contents" / "MacOS" / binaryName,
+					   fs::copy_options::overwrite_existing, ec );
+		if( ec )
+		{
+			if( log )
+				log( "  SKIP " + info.name + ": could not copy shell (" + ec.message() + ")" );
+			++result.skipped;
+			continue;
+		}
+
+		const fs::path guestSrc = fs::path( bundlePath );
+		const std::string leaf  = guestSrc.filename().string();
+		fs::copy( guestSrc, out / "Contents" / "Guest" / leaf,
+				  fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec );
+		if( ec )
+		{
+			if( log )
+				log( "  SKIP " + info.name + ": could not copy guest (" + ec.message() + ")" );
+			++result.skipped;
+			continue;
+		}
+
+		{
+			std::ofstream plist( out / "Contents" / "Info.plist" );
+			plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				  << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+					 "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+				  << "<plist version=\"1.0\">\n<dict>\n"
+				  << "\t<key>CFBundleExecutable</key>\n\t<string>" << binaryName << "</string>\n"
+				  << "\t<key>CFBundleIdentifier</key>\n\t<string>" << identifier << "</string>\n"
+				  << "\t<key>CFBundlePackageType</key>\n\t<string>BNDL</string>\n"
+				  << "</dict>\n</plist>\n";
+		}
+		{
+			std::ofstream manifest( out / "Contents" / "manifest.json" );
+			manifest << ffglManifestJson( info, identifier, leaf );
+		}
+
+		if( log )
+			log( "  wrote " + out.filename().string() + " (" + std::to_string( info.params.size() )
+				 + " params)" );
+		++result.generated;
+		result.bundles.push_back( fs::weakly_canonical( out, ec ).string() );
+	}
+
+	return result;
+}
+
+} // namespace ofxgen
+
+#endif // OFXGEN_HAS_FFGL_GUEST

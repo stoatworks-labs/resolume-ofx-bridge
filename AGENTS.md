@@ -43,6 +43,37 @@ plugin and configure itself from a sidecar JSON manifest read at load time.
 This is the key architectural fact: the generator is a file-copier, not a build
 system. Users do not need Xcode/MSVC.
 
+## The any-to-any matrix
+
+The OFX→FFGL direction was the founding product, but the architecture — a
+prebuilt self-configuring shell + a sidecar manifest + a file-copying
+generator — is direction-agnostic. Where each cell stands:
+
+| guest ↓ / host → | FFGL (Resolume) | OpenFX (Resolve, Vegas, Nuke, Natron) | AE / Premiere |
+|---|---|---|---|
+| **OpenFX** | ✅ `ofxgen generate` — the original | native | planned: Rust AE shell over `ofxbridge` (gated on the Adobe pipe-cleaner being seen in a real host) |
+| **FFGL** | native | ✅ `ofxgen wrap-ffgl` — shell `ffglofxshell`, guest lib `source/ffglguest/` | planned: same guest lib, AE shell |
+| **AE** | ❌ declined | ❌ declined | native |
+
+AE-as-guest is declined on cost: it means implementing Adobe's host API (the
+PF suites) from scratch, for plugins that assume an Adobe app around them.
+
+What the FFGL→OFX crossing costs, stated on the tin: frames cross as RGBA8
+premultiplied (FFGL is an 8-bit world), the guest renders in a private
+offscreen CGL context serialised by a global mutex, and a guest that
+integrates its own clock scrubs like a live source, not a file. Stateless
+guests are exact: a wrapped Luma Key agrees byte-for-byte with the
+hand-written OFX port on the probe's test frame.
+
+### Traps found building it
+
+- **`FF_GET_PARAM_GROUP` is a fill-my-buffer call** (`GetStringStruct` with a
+  host-supplied `StringBufferStruct`), unlike the neighbouring getters that
+  return a pointer. Passing an index like the others does, the plugin
+  memmoves into garbage and dies inside its own `getParamGroup`.
+- FFGL strings are bounded, not terminated: 16-char names, 4-char ids.
+- Repeated `--bundle` flags: the generate path keeps one, wrap-ffgl takes all.
+
 ## Layout
 
 - `source/ofxbridge/` — the OFX host. Shared by the probe and the FFGL wrapper,

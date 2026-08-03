@@ -137,6 +137,7 @@ void usage()
 	printf( "usage:\n"
 			"  ofxgen list     [--dir PATH]...\n"
 			"  ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only IDENTIFIER] [--bundle PATH]\n"
+			"  ofxgen wrap-ffgl --out DIR (--bundle FFGL.bundle | --dir PATH)... [--template SHELL.ofx]\n"
 			"  ofxgen verify   BUNDLE\n" );
 }
 
@@ -285,6 +286,7 @@ int main( int argc, char** argv )
 	std::string templatePath;
 	std::string only;
 	std::string onlyBundle;
+	std::vector< std::string > bundleList;
 	std::string target;
 
 	for( int i = 2; i < argc; ++i )
@@ -299,7 +301,10 @@ int main( int argc, char** argv )
 		else if( a == "--only" && i + 1 < argc )
 			only = argv[ ++i ];
 		else if( a == "--bundle" && i + 1 < argc )
-			onlyBundle = argv[ ++i ];
+		{
+			onlyBundle = argv[ i + 1 ];
+			bundleList.push_back( argv[ ++i ] );
+		}
 		else if( a[ 0 ] != '-' )
 			target = a;
 		else
@@ -332,6 +337,46 @@ int main( int argc, char** argv )
 			printf( "%-48s %-28s %s\n", p.identifier.c_str(), p.label.c_str(),
 					p.error.empty() ? "ok" : p.error.c_str() );
 		return 0;
+	}
+
+	if( command == "wrap-ffgl" )
+	{
+#if OFXGEN_HAS_FFGL_GUEST
+		if( outDir.empty() )
+		{
+			fprintf( stderr, "wrap-ffgl needs --out DIR\n" );
+			return 2;
+		}
+		ofxgen::WrapFfglOptions options;
+		options.outDir    = outDir;
+		options.shellPath = templatePath.empty() ? ofxgen::findOfxShell( argv[ 0 ] ) : templatePath;
+		options.bundles = bundleList;
+		for( const std::string& d : dirs )
+		{
+			std::error_code ec;
+			for( const auto& e : std::filesystem::directory_iterator( d, ec ) )
+				if( e.path().extension() == ".bundle" )
+					options.bundles.push_back( e.path().string() );
+		}
+		if( options.bundles.empty() )
+		{
+			fprintf( stderr, "wrap-ffgl needs --bundle PATH or --dir DIR with .bundle files\n" );
+			return 2;
+		}
+
+		const ofxgen::Result result =
+			ofxgen::wrapFfgl( options, []( const std::string& line ) { printf( "%s\n", line.c_str() ); } );
+		if( !result.error.empty() )
+		{
+			fprintf( stderr, "%s\n", result.error.c_str() );
+			return 1;
+		}
+		printf( "%d wrapped, %d skipped, into %s\n", result.generated, result.skipped, outDir.c_str() );
+		return result.generated > 0 ? 0 : 1;
+#else
+		fprintf( stderr, "wrap-ffgl is macOS-only for now\n" );
+		return 2;
+#endif
 	}
 
 	if( command == "generate" )

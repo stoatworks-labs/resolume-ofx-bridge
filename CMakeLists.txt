@@ -138,9 +138,59 @@ endif()
 # Shared by the CLI and the app so that "what a generated bundle contains" has
 # exactly one implementation.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# ffglguest - host an FFGL plugin as a guest (the FFGL->OFX cell of the
+# any-to-any matrix). macOS only: the offscreen context is CGL.
+# ---------------------------------------------------------------------------
+if( APPLE )
+	add_library( ffglguest STATIC source/ffglguest/FfglGuest.cpp )
+	target_include_directories( ffglguest PUBLIC
+		source/ffglguest
+		external/ffgl/source/lib/ffgl
+	)
+	target_link_libraries( ffglguest PUBLIC "-framework OpenGL" )
+endif()
+
+# ---------------------------------------------------------------------------
+# ffglofxshell - the generic OFX plugin that carries an FFGL guest. Built once;
+# the generator copies it per wrapped plugin, exactly like ofxwrapper going the
+# other way. Compiles the OFX Support (plugin-side) library from the vendored
+# SDK, the same eight files every fleet OFX plugin builds.
+# ---------------------------------------------------------------------------
+if( APPLE )
+	add_library( ffglofxshell MODULE
+		source/ofxshell/FfglOfxShell.cpp
+		source/ffgl/Json.cpp
+		source/ffgl/SelfPath.cpp
+		"${OFX_ROOT}/Support/Library/ofxsCore.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsImageEffect.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsInteract.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsLog.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsMultiThread.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsParams.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsProperty.cpp"
+		"${OFX_ROOT}/Support/Library/ofxsPropertyValidation.cpp"
+	)
+	target_include_directories( ffglofxshell PRIVATE
+		source/ffgl
+		"${OFX_ROOT}/include"
+		"${OFX_ROOT}/Support/include"
+	)
+	set_target_properties( ffglofxshell PROPERTIES
+		PREFIX ""
+		SUFFIX ".ofx"
+		OUTPUT_NAME "ffglofxshell"
+	)
+	target_link_libraries( ffglofxshell PRIVATE ffglguest )
+endif()
+
 add_library( ofxgenlib STATIC source/gen/Generator.cpp )
 target_include_directories( ofxgenlib PUBLIC source/gen )
 target_link_libraries( ofxgenlib PUBLIC ofxbridge )
+if( APPLE )
+	target_link_libraries( ofxgenlib PUBLIC ffglguest )
+	target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 )
+endif()
 
 # ---------------------------------------------------------------------------
 # ofxgen - the generator CLI

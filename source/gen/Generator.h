@@ -79,4 +79,28 @@ std::string sanitise( const std::string& in );
 /// as long as the callbacks are.
 Result generate( const Options& options, const LogFn& log, const ProgressFn& progress, const CancelFn& cancelled );
 
+// ---------------------------------------------------------------------------
+// The other direction: FFGL plugins wrapped as OFX bundles (macOS only).
+// ---------------------------------------------------------------------------
+
+struct WrapFfglOptions
+{
+	/// FFGL bundles to wrap.
+	std::vector< std::string > bundles;
+
+	/// Where the .ofx.bundle outputs are written. Created if missing.
+	std::string outDir;
+
+	/// The prebuilt ffglofxshell.ofx binary. Empty means findOfxShell().
+	std::string shellPath;
+};
+
+/// Locate the prebuilt OFX shell binary, next to the running executable, one
+/// level up, or in ./build for a development tree.
+std::string findOfxShell( const std::string& executablePath );
+
+/// Describe each FFGL bundle and write a self-contained OFX bundle around it:
+/// the shell binary, a manifest, and a copy of the guest inside Contents/Guest.
+Result wrapFfgl( const WrapFfglOptions& options, const LogFn& log );
+
 } // namespace ofxgen
