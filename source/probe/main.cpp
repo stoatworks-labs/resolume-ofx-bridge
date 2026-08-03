@@ -29,7 +29,79 @@ namespace {
 
 void usage()
 {
-	printf( "usage: ofxprobe [--dir PATH]... [--json] [--manifest IDENTIFIER] [--render IDENTIFIER] [--quiet]\n" );
+	printf( "usage: ofxprobe [--dir PATH]... [--json] [--manifest IDENTIFIER] [--render IDENTIFIER]\n"
+			"                [--size WxH] [--out FILE.bmp] [--quiet]\n" );
+}
+
+void put32( std::vector< uint8_t >& v, uint32_t x )
+{
+	v.push_back( (uint8_t)( x ) );
+	v.push_back( (uint8_t)( x >> 8 ) );
+	v.push_back( (uint8_t)( x >> 16 ) );
+	v.push_back( (uint8_t)( x >> 24 ) );
+}
+
+/// Write the input and output frames side by side as a 24-bit BMP, input on
+/// the left. BMP because it needs no libraries and macOS `sips` converts it to
+/// PNG. Frames are RGBA with row 0 at the bottom (the OFX convention), which
+/// is also BMP's row order, so rows copy straight across.
+bool writeComparisonBmp( const std::string& path,
+						 const ofxbridge::Frame& in,
+						 const ofxbridge::Frame& out,
+						 int width, int height )
+{
+	const int gap    = 8;
+	const int outW   = width * 2 + gap;
+	const int stride = ( outW * 3 + 3 ) & ~3;
+
+	std::vector< uint8_t > pixels( (size_t)stride * height, 24 );
+
+	for( int y = 0; y < height; ++y )
+	{
+		uint8_t* row = pixels.data() + (size_t)y * stride;
+		for( int x = 0; x < width; ++x )
+		{
+			const uint8_t* l = in.data.data() + (size_t)y * in.rowBytes + (size_t)x * 4;
+			uint8_t* d       = row + (size_t)x * 3;
+			d[ 0 ] = l[ 2 ];
+			d[ 1 ] = l[ 1 ];
+			d[ 2 ] = l[ 0 ];
+
+			const uint8_t* r = out.data.data() + (size_t)y * out.rowBytes + (size_t)x * 4;
+			uint8_t* d2      = row + (size_t)( x + width + gap ) * 3;
+			d2[ 0 ] = r[ 2 ];
+			d2[ 1 ] = r[ 1 ];
+			d2[ 2 ] = r[ 0 ];
+		}
+	}
+
+	std::vector< uint8_t > header;
+	header.push_back( 'B' );
+	header.push_back( 'M' );
+	put32( header, (uint32_t)( 14 + 40 + pixels.size() ) );
+	put32( header, 0 );
+	put32( header, 14 + 40 );
+	put32( header, 40 );
+	put32( header, (uint32_t)outW );
+	put32( header, (uint32_t)height );
+	header.push_back( 1 );
+	header.push_back( 0 );// planes
+	header.push_back( 24 );
+	header.push_back( 0 );// bpp
+	put32( header, 0 );   // BI_RGB
+	put32( header, (uint32_t)pixels.size() );
+	put32( header, 2835 );
+	put32( header, 2835 );
+	put32( header, 0 );
+	put32( header, 0 );
+
+	FILE* f = fopen( path.c_str(), "wb" );
+	if( f == nullptr )
+		return false;
+	fwrite( header.data(), 1, header.size(), f );
+	fwrite( pixels.data(), 1, pixels.size(), f );
+	fclose( f );
+	return true;
 }
 
 /// Instantiate a plugin and push one frame through it, entirely on the CPU.
@@ -38,7 +110,9 @@ void usage()
 /// render failure can be attributed without involving Resolume or a GPU.
 int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 				const std::string& identifier,
-				const std::vector< std::pair< std::string, double > >& overrides )
+				const std::vector< std::pair< std::string, double > >& overrides,
+				int width, int height,
+				const std::string& outPath )
 {
 	const ofxbridge::PluginDesc* target = nullptr;
 	for( const auto& p : plugins )
@@ -55,9 +129,6 @@ int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 		fprintf( stderr, "plugin is not usable: %s\n", target->error.c_str() );
 		return 1;
 	}
-
-	const int width  = 64;
-	const int height = 32;
 
 	ofxbridge::Host host;
 	std::string error;
@@ -135,6 +206,17 @@ int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 	for( const auto& m : effect->messages() )
 		printf( "  plugin said: %s\n", m.c_str() );
 
+	if( !outPath.empty() )
+	{
+		if( writeComparisonBmp( outPath, in, out, width, height ) )
+			printf( "  wrote %s (input | output)\n", outPath.c_str() );
+		else
+		{
+			fprintf( stderr, "could not write %s\n", outPath.c_str() );
+			return 1;
+		}
+	}
+
 	return 0;
 }
 
@@ -148,6 +230,9 @@ int main( int argc, char** argv )
 	std::string wantManifestFor;
 	std::string wantRenderFor;
 	std::vector< std::pair< std::string, double > > overrides;
+	int renderWidth  = 64;
+	int renderHeight = 32;
+	std::string outPath;
 
 	for( int i = 1; i < argc; ++i )
 	{
@@ -173,6 +258,19 @@ int main( int argc, char** argv )
 			}
 			overrides.emplace_back( kv.substr( 0, eq ), atof( kv.c_str() + eq + 1 ) );
 		}
+		else if( a == "--size" && i + 1 < argc )
+		{
+			const std::string wh = argv[ ++i ];
+			const size_t x       = wh.find( 'x' );
+			if( x == std::string::npos || sscanf( wh.c_str(), "%dx%d", &renderWidth, &renderHeight ) != 2
+				|| renderWidth < 1 || renderHeight < 1 )
+			{
+				fprintf( stderr, "--size expects WxH, got '%s'\n", wh.c_str() );
+				return 2;
+			}
+		}
+		else if( a == "--out" && i + 1 < argc )
+			outPath = argv[ ++i ];
 		else if( a == "-h" || a == "--help" )
 		{
 			usage();
@@ -196,7 +294,7 @@ int main( int argc, char** argv )
 		fputs( log.c_str(), stderr );
 
 	if( !wantRenderFor.empty() )
-		return renderTest( plugins, wantRenderFor, overrides );
+		return renderTest( plugins, wantRenderFor, overrides, renderWidth, renderHeight, outPath );
 
 	if( !wantManifestFor.empty() )
 	{

@@ -385,8 +385,17 @@ std::unique_ptr< Effect > createEffect( Host& host,
 	// describes *every* bundle sitting beside the one we want, inside a live video
 	// process. That is wasteful and means a broken neighbour can misbehave during
 	// a show. Fixing it properly needs a bundle-scoped load path in HostSupport.
-	static std::map< std::string, std::unique_ptr< OFX::Host::ImageEffect::PluginCache > > caches;
-	static std::map< std::string, std::unique_ptr< OFX::Host::PluginCache > > binaryCaches;
+	// Deliberately leaked (never destroyed): destroying these from an exit-time
+	// destructor crashes the process. At exit, each plugin module's own
+	// __cxa_atexit finalizers run before ours do, destroying the plugin-side
+	// state (for Support-library plugins that includes the OfxPlugin struct the
+	// cache still points at); ~PluginCache then sends kOfxActionUnload through
+	// that freed memory and jumps to null. The OS reclaims everything at process
+	// death anyway, and a host is not required to send Unload on its way out.
+	static auto& caches =
+		*new std::map< std::string, std::unique_ptr< OFX::Host::ImageEffect::PluginCache > >();
+	static auto& binaryCaches =
+		*new std::map< std::string, std::unique_ptr< OFX::Host::PluginCache > >();
 
 	auto it = caches.find( bundlePath );
 	if( it == caches.end() )
