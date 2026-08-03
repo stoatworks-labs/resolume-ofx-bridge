@@ -129,7 +129,13 @@ OfxFFGLPlugin::~OfxFFGLPlugin()
 FFResult OfxFFGLPlugin::InitGL( const FFGLViewportStruct* vp )
 {
 	if( !PluginContext::get().loaded )
+	{
+		// Say why. A swallowed context error looks identical to every other
+		// way FF_INSTANTIATE_GL can fail, and cost real time to attribute.
+		fprintf( stderr, "ofxbridge: plugin context not loaded: %s\n",
+				 PluginContext::get().error.c_str() );
 		return FF_FAIL;
+	}
 
 	glGenFramebuffers( 1, &_readFbo );
 	glGenFramebuffers( 1, &_blitFbo );
@@ -188,6 +194,10 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 	_effect = ofxbridge::createEffect( *_host, ctx.manifest.bundlePath, ctx.manifest.identifier, error );
 	if( !_effect )
 	{
+		// The one line that says why. This was once swallowed, and the symptom
+		// -- FF_INSTANTIATE_GL failing with no message anywhere -- cost real
+		// time to attribute.
+		fprintf( stderr, "ofxbridge: createEffect failed: %s\n", error.c_str() );
 		_effectFailed = true;
 		return false;
 	}
@@ -195,6 +205,7 @@ bool OfxFFGLPlugin::ensureEffect( int width, int height )
 	_effect->setFrameSize( width, height );
 	if( !_effect->init( error ) )
 	{
+		fprintf( stderr, "ofxbridge: effect init failed: %s\n", error.c_str() );
 		_effect.reset();
 		_effectFailed = true;
 		return false;
@@ -331,6 +342,13 @@ float OfxFFGLPlugin::GetFloatParameter( unsigned int index )
 
 FFResult OfxFFGLPlugin::SetTextParameter( unsigned int index, const char* value )
 {
+	// The About text is generated, never stored — but it must ACCEPT a set.
+	// The SDK's instantiateGL pushes every parameter's default into a fresh
+	// instance and destroys it on the first FF_FAIL, so rejecting this set
+	// made every generated plugin fail to instantiate, with no message,
+	// anywhere. _textValues covers only the OFX plugin's own parameters.
+	if( index >= _aboutBase )
+		return FF_SUCCESS;
 	if( index >= _textValues.size() )
 		return FF_FAIL;
 	_textValues[ index ] = value ? value : "";
