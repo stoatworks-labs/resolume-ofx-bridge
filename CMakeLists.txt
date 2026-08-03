@@ -6,7 +6,7 @@ if( APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES )
 	set( CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" )
 endif()
 
-project( resolume-ofx-bridge VERSION 0.7.0 LANGUAGES CXX )
+project( resolume-ofx-bridge VERSION 0.8.0 LANGUAGES CXX )
 
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )
@@ -152,6 +152,37 @@ if( APPLE )
 endif()
 
 # ---------------------------------------------------------------------------
+# aeguest - the After Effects guest host: a Rust staticlib (exact PF struct
+# layouts from the community -sys bindings) behind a narrow C ABI, plus the
+# C++ face in source/aeguest/. Universal via two cargo targets + lipo.
+# ---------------------------------------------------------------------------
+if( APPLE )
+	set( AEGUEST_TARGET_DIR "${CMAKE_BINARY_DIR}/aeguest-target" )
+	set( AEGUEST_A "${CMAKE_BINARY_DIR}/libaeguest_universal.a" )
+	add_custom_command(
+		OUTPUT "${AEGUEST_A}"
+		COMMAND cargo build --release --target aarch64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
+		COMMAND cargo build --release --target x86_64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
+		COMMAND lipo "${AEGUEST_TARGET_DIR}/aarch64-apple-darwin/release/libaeguest.a"
+					 "${AEGUEST_TARGET_DIR}/x86_64-apple-darwin/release/libaeguest.a"
+					 -create -output "${AEGUEST_A}"
+		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/aeguest"
+		DEPENDS aeguest/src/lib.rs aeguest/Cargo.toml
+		COMMENT "cargo: aeguest (universal)"
+		VERBATIM
+	)
+	add_custom_target( aeguest_rust DEPENDS "${AEGUEST_A}" )
+
+	add_library( bridgejson STATIC source/ffgl/Json.cpp )
+	target_include_directories( bridgejson PUBLIC source/ffgl )
+
+	add_library( aeguest_cpp STATIC source/aeguest/AeGuest.cpp )
+	target_include_directories( aeguest_cpp PUBLIC source/aeguest )
+	target_link_libraries( aeguest_cpp PUBLIC bridgejson "${AEGUEST_A}" )
+	add_dependencies( aeguest_cpp aeguest_rust )
+endif()
+
+# ---------------------------------------------------------------------------
 # ffglofxshell - the generic OFX plugin that carries an FFGL guest. Built once;
 # the generator copies it per wrapped plugin, exactly like ofxwrapper going the
 # other way. Compiles the OFX Support (plugin-side) library from the vendored
@@ -160,7 +191,6 @@ endif()
 if( APPLE )
 	add_library( ffglofxshell MODULE
 		source/ofxshell/FfglOfxShell.cpp
-		source/ffgl/Json.cpp
 		source/ffgl/SelfPath.cpp
 		"${OFX_ROOT}/Support/Library/ofxsCore.cpp"
 		"${OFX_ROOT}/Support/Library/ofxsImageEffect.cpp"
@@ -181,15 +211,15 @@ if( APPLE )
 		SUFFIX ".ofx"
 		OUTPUT_NAME "ffglofxshell"
 	)
-	target_link_libraries( ffglofxshell PRIVATE ffglguest )
+	target_link_libraries( ffglofxshell PRIVATE ffglguest aeguest_cpp )
 endif()
 
 add_library( ofxgenlib STATIC source/gen/Generator.cpp )
 target_include_directories( ofxgenlib PUBLIC source/gen )
 target_link_libraries( ofxgenlib PUBLIC ofxbridge )
 if( APPLE )
-	target_link_libraries( ofxgenlib PUBLIC ffglguest )
-	target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 )
+	target_link_libraries( ofxgenlib PUBLIC ffglguest aeguest_cpp )
+	target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 OFXGEN_HAS_AE_GUEST=1 )
 endif()
 
 # ---------------------------------------------------------------------------

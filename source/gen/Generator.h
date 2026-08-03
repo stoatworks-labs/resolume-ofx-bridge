@@ -103,4 +103,8 @@ std::string findOfxShell( const std::string& executablePath );
 /// the shell binary, a manifest, and a copy of the guest inside Contents/Guest.
 Result wrapFfgl( const WrapFfglOptions& options, const LogFn& log );
 
+/// The same, for After Effects plugins (.plugin bundles): the guest renders
+/// through the bridge's minimal AE host instead of a GL context.
+Result wrapAe( const WrapFfglOptions& options, const LogFn& log );
+
 } // namespace ofxgen

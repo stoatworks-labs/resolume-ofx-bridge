@@ -486,3 +486,191 @@ Result wrapFfgl( const WrapFfglOptions& options, const LogFn& log )
 } // namespace ofxgen
 
 #endif // OFXGEN_HAS_FFGL_GUEST
+
+// ---------------------------------------------------------------------------
+// AE -> OFX. The guest is described through the bridge's own minimal AE host
+// (aeguest), so the parameters in the manifest are by construction the ones
+// the renderer will drive. The effect's display name is not part of the API —
+// it lives in the PiPL resource — so it is read from there, with the bundle
+// filename as the honest fallback.
+// ---------------------------------------------------------------------------
+
+#if OFXGEN_HAS_AE_GUEST
+
+#include "AeGuest.h"
+
+#include <fstream>
+
+namespace ofxgen {
+
+namespace {
+
+/// Pull the effect name out of a PiPL: "8BIMname", 8 bytes of header, then a
+/// Pascal string. Returns empty when nothing readable is found.
+std::string piplName( const fs::path& bundle )
+{
+	std::error_code ec;
+	const fs::path resources = bundle / "Contents" / "Resources";
+	for( const auto& e : fs::directory_iterator( resources, ec ) )
+	{
+		if( e.path().extension() != ".rsrc" )
+			continue;
+		std::ifstream f( e.path(), std::ios::binary );
+		std::string data( ( std::istreambuf_iterator< char >( f ) ), std::istreambuf_iterator< char >() );
+		const size_t at = data.find( "8BIMname" );
+		if( at == std::string::npos || at + 8 + 8 + 1 >= data.size() )
+			continue;
+		const size_t pascal = at + 8 + 8;
+		const size_t len    = (unsigned char)data[ pascal ];
+		if( pascal + 1 + len <= data.size() )
+			return data.substr( pascal + 1, len );
+	}
+	return {};
+}
+
+std::string aeManifestJson( const std::vector< aeguest::GuestParam >& params,
+							const std::string& identifier, const std::string& label,
+							const std::string& guestLeaf )
+{
+	// Reuses the FFGL manifest vocabulary so the shell has one parameter
+	// model: float -> 10 (standard), bool -> 0, popup -> 11 (option, element
+	// values are positions), color -> 300.
+	std::string o;
+	o += "{\n";
+	o += "  \"manifestVersion\": 2,\n";
+	o += "  \"guestType\": \"ae\",\n";
+	o += "  \"identifier\": \"" + jsonEscape( identifier ) + "\",\n";
+	o += "  \"label\": \"" + jsonEscape( label + " (AE)" ) + "\",\n";
+	o += "  \"grouping\": \"After Effects\",\n";
+	o += "  \"guestBundle\": \"Guest/" + jsonEscape( guestLeaf ) + "\",\n";
+	o += "  \"isSource\": false,\n";
+	o += "  \"versionMajor\": 1,\n";
+	o += "  \"versionMinor\": 0,\n";
+	o += "  \"params\": [\n";
+
+	bool first = true;
+	for( const aeguest::GuestParam& p : params )
+	{
+		if( p.kind == "unsupported" )
+			continue;
+
+		int type = 10;
+		if( p.kind == "bool" )
+			type = 0;
+		else if( p.kind == "popup" )
+			type = 11;
+		else if( p.kind == "color" )
+			type = 300;
+
+		if( !first )
+			o += ",\n";
+		first = false;
+		o += "    {\"index\": " + std::to_string( p.index );
+		o += ", \"name\": \"" + jsonEscape( p.name ) + "\"";
+		o += ", \"type\": " + std::to_string( type );
+		o += ", \"default\": " + std::to_string( p.defaultValue );
+		o += ", \"min\": " + std::to_string( p.rangeMin );
+		o += ", \"max\": " + std::to_string( p.rangeMax );
+		if( !p.options.empty() )
+		{
+			o += ", \"elements\": [";
+			for( size_t e = 0; e < p.options.size(); ++e )
+				o += ( e ? "," : "" ) + std::string( "\"" ) + jsonEscape( p.options[ e ] ) + "\"";
+			o += "], \"elementValues\": [";
+			for( size_t e = 0; e < p.options.size(); ++e )
+				o += ( e ? "," : "" ) + std::to_string( e );
+			o += "]";
+		}
+		o += "}";
+	}
+	o += "\n  ]\n}\n";
+	return o;
+}
+
+} // namespace
+
+Result wrapAe( const WrapFfglOptions& options, const LogFn& log )
+{
+	Result result;
+	std::error_code ec;
+
+	if( options.shellPath.empty() || !fs::exists( options.shellPath, ec ) )
+	{
+		result.error = "OFX shell not found. Build it first "
+					   "(cmake --build build --target ffglofxshell), or pass one explicitly.";
+		return result;
+	}
+	if( options.outDir.empty() )
+	{
+		result.error = "no output directory";
+		return result;
+	}
+	fs::create_directories( options.outDir, ec );
+
+	for( const std::string& bundlePath : options.bundles )
+	{
+		std::string error;
+		aeguest::AeGuest probe;
+		if( !probe.open( bundlePath, error ) )
+		{
+			if( log )
+				log( "  SKIP " + bundlePath + ": " + error );
+			++result.skipped;
+			continue;
+		}
+
+		std::string label = piplName( bundlePath );
+		if( label.empty() )
+			label = fs::path( bundlePath ).stem().string();
+
+		const std::string safe       = sanitise( label );
+		const std::string identifier = "com.stoatworks.aewrap." + [ & ] {
+			std::string s;
+			for( char c : safe )
+				s += (char)tolower( (unsigned char)c );
+			return s;
+		}();
+
+		const fs::path out = fs::path( options.outDir ) / ( safe + "_AE.ofx.bundle" );
+		fs::remove_all( out, ec );
+		fs::create_directories( out / "Contents" / "MacOS", ec );
+		fs::create_directories( out / "Contents" / "Guest", ec );
+
+		const std::string binaryName = safe + "_AE.ofx";
+		fs::copy_file( options.shellPath, out / "Contents" / "MacOS" / binaryName,
+					   fs::copy_options::overwrite_existing, ec );
+
+		const fs::path guestSrc = fs::path( bundlePath );
+		const std::string leaf  = guestSrc.filename().string();
+		fs::copy( guestSrc, out / "Contents" / "Guest" / leaf,
+				  fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec );
+
+		{
+			std::ofstream plist( out / "Contents" / "Info.plist" );
+			plist << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+				  << "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+					 "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+				  << "<plist version=\"1.0\">\n<dict>\n"
+				  << "\t<key>CFBundleExecutable</key>\n\t<string>" << binaryName << "</string>\n"
+				  << "\t<key>CFBundleIdentifier</key>\n\t<string>" << identifier << "</string>\n"
+				  << "\t<key>CFBundlePackageType</key>\n\t<string>BNDL</string>\n"
+				  << "</dict>\n</plist>\n";
+		}
+		{
+			std::ofstream manifest( out / "Contents" / "manifest.json" );
+			manifest << aeManifestJson( probe.params(), identifier, label, leaf );
+		}
+
+		if( log )
+			log( "  wrote " + out.filename().string() + " ("
+				 + std::to_string( probe.params().size() ) + " params)" );
+		++result.generated;
+		result.bundles.push_back( fs::weakly_canonical( out, ec ).string() );
+	}
+
+	return result;
+}
+
+} // namespace ofxgen
+
+#endif // OFXGEN_HAS_AE_GUEST

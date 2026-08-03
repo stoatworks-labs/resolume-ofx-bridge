@@ -53,10 +53,18 @@ generator — is direction-agnostic. Where each cell stands:
 |---|---|---|---|
 | **OpenFX** | ✅ `ofxgen generate` — the original | native | planned: Rust AE shell over `ofxbridge` (gated on the Adobe pipe-cleaner being seen in a real host) |
 | **FFGL** | native | ✅ `ofxgen wrap-ffgl` — shell `ffglofxshell`, guest lib `source/ffglguest/` | planned: same guest lib, AE shell |
-| **AE** | ❌ declined | ❌ declined | native |
+| **AE** | ✅ by composition: `wrap-ae` then `generate` | ✅ `ofxgen wrap-ae` — minimal AE host in `aeguest/` (Rust) + `source/aeguest/` | native |
 
-AE-as-guest is declined on cost: it means implementing Adobe's host API (the
-PF suites) from scratch, for plugins that assume an Adobe app around them.
+AE-as-guest runs on a deliberately **minimal** AE host (`aeguest/`, Rust over
+the community `-sys` bindings — no Adobe SDK): the `add_param` interact
+callback, the `iterate` util callback, the pica Handle Suite (served for
+versions 1 AND 2 — Adobe's `kPFHandleSuiteVersion1` is literally 2), and
+round-tripped global/sequence data. Well-behaved CPU effects work; effects
+demanding deeper application services are skipped BY NAME — every unknown
+suite request prints to stderr, so the next capability is always evidence.
+The AE→FFGL cell is the two bridges composed: `wrap-ae` writes an OFX bundle,
+`generate` wraps that for Resolume, and the chain renders through real GL
+with only 8-bit rounding between it and the native effect.
 
 What the FFGL→OFX crossing costs, stated on the tin: frames cross as RGBA8
 premultiplied (FFGL is an 8-bit world), the guest renders in a private

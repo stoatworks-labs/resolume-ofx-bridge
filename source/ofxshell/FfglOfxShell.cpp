@@ -32,6 +32,7 @@
 
 #include "../ffgl/Json.h"
 #include "../ffgl/SelfPath.h"
+#include "../aeguest/AeGuest.h"
 #include "../ffglguest/FfglGuest.h"
 
 namespace
@@ -57,6 +58,9 @@ enum FfglType : int
 	kSaturation = 201,
 	kBrightness = 202,
 	kAlpha      = 203,
+	/// Manifest-local, not an FFGL type: an AE colour parameter, carried as a
+	/// packed 0xRRGGBB double across the guest ABI.
+	kColor = 300,
 };
 
 struct ManifestParam
@@ -75,6 +79,7 @@ struct ManifestParam
 
 struct Manifest
 {
+	std::string guestType = "ffgl";//!< "ffgl" | "ae"
 	std::string identifier;
 	std::string label;
 	std::string grouping = "FFGL";
@@ -122,6 +127,7 @@ const Manifest& manifest()
 			return v ? v->number( fallback ) : fallback;
 		};
 
+		out.guestType    = str( root, "guestType", "ffgl" );
 		out.identifier   = str( root, "identifier" );
 		out.label        = str( root, "label" );
 		out.grouping     = str( root, "grouping", "FFGL" );
@@ -243,6 +249,9 @@ public:
 				break;
 			case kBuffer:
 				break;// not representable; leave at the guest's default
+			case kColor:
+				b.rgb = fetchRGBParam( scriptName( p ) );
+				break;
 			default:
 				b.number = fetchDoubleParam( scriptName( p ) );
 				break;
@@ -267,41 +276,57 @@ public:
 		const bool premultiplied =
 			srcClip != nullptr && srcClip->getPreMultiplication() == OFX::eImagePreMultiplied;
 
-		// --- everything GL happens under the lock -------------------------
+		const bool toAe = m.guestType == "ae";
+
+		// One guest render at a time process-wide. Strictly the AE path could
+		// run concurrently per instance, but correctness beats throughput on
+		// the first release of a cell.
 		std::lock_guard< std::mutex > lock( renderMutex() );
 
 		std::string error;
 		if( !guestOpen )
 		{
 			const std::string path = contentsDir() + "/" + m.guestBundle;
-			if( !guest.open( path, error ) )
+			const bool ok = toAe ? aeGuest.open( path, error ) : guest.open( path, error );
+			if( !ok )
 				OFX::throwSuiteStatusException( kOfxStatFailed );
 			guestOpen = true;
 		}
 
-		if( !guest.ensureInstance( width, height, error ) )
-			OFX::throwSuiteStatusException( kOfxStatFailed );
-
-		pushParams( args.time );
-
 		double fps = dstClip->getFrameRate();
 		if( !( fps > 0.0 ) )
 			fps = 24.0;
-		guest.setTime( args.time / fps );
 
-		// --- frames across the boundary, RGBA8 premultiplied ---------------
+		// FFGL is a premultiplied world (Resolume's convention); AE hands its
+		// effects straight colour. Convert to whichever the guest is owed.
+		const bool guestPremult = !toAe;
+
 		std::vector< uint8_t > inFrame;
 		if( src )
 		{
 			inFrame.resize( (size_t)width * height * 4 );
-			toRgba8Premult( *src, bounds, premultiplied, inFrame.data(), width, height );
+			toRgba8( *src, bounds, premultiplied, guestPremult, inFrame.data(), width, height );
+		}
+		std::vector< uint8_t > outFrame( (size_t)width * height * 4 );
+
+		if( toAe )
+		{
+			pushParams( args.time, true );
+			if( !aeGuest.render( src ? inFrame.data() : nullptr, outFrame.data(), width, height,
+								 args.time, fps, error ) )
+				OFX::throwSuiteStatusException( kOfxStatFailed );
+		}
+		else
+		{
+			if( !guest.ensureInstance( width, height, error ) )
+				OFX::throwSuiteStatusException( kOfxStatFailed );
+			pushParams( args.time, false );
+			guest.setTime( args.time / fps );
+			if( !guest.render( src ? inFrame.data() : nullptr, outFrame.data(), error ) )
+				OFX::throwSuiteStatusException( kOfxStatFailed );
 		}
 
-		std::vector< uint8_t > outFrame( (size_t)width * height * 4 );
-		if( !guest.render( src ? inFrame.data() : nullptr, outFrame.data(), error ) )
-			OFX::throwSuiteStatusException( kOfxStatFailed );
-
-		fromRgba8Premult( outFrame.data(), *dst, bounds, premultiplied, args.renderWindow );
+		fromRgba8( outFrame.data(), *dst, bounds, premultiplied, guestPremult, args.renderWindow );
 	}
 
 	void changedParam( const OFX::InstanceChangedArgs&, const std::string& paramName ) override
@@ -332,41 +357,85 @@ private:
 		OFX::ChoiceParam* choice      = nullptr;
 		OFX::StringParam* text        = nullptr;
 		OFX::PushButtonParam* push    = nullptr;
+		OFX::RGBParam* rgb            = nullptr;
 	};
 
-	void pushParams( double t )
+	void pushParams( double t, bool toAe )
 	{
 		for( const Bound& b : bound )
 		{
-			const FFUInt32 index = (FFUInt32)b.spec->index;
+			const int index = b.spec->index;
+
+			double value        = 0.0;
+			bool haveValue      = false;
+			std::string textVal;
+			bool haveText       = false;
+
 			if( b.number != nullptr )
-				guest.setParam( index, (float)b.number->getValueAtTime( t ) );
+			{
+				value     = b.number->getValueAtTime( t );
+				haveValue = true;
+			}
 			else if( b.integer != nullptr )
-				guest.setParam( index, (float)b.integer->getValueAtTime( t ) );
+			{
+				value     = b.integer->getValueAtTime( t );
+				haveValue = true;
+			}
 			else if( b.boolean != nullptr )
-				guest.setParam( index, b.boolean->getValueAtTime( t ) ? 1.0f : 0.0f );
+			{
+				value     = b.boolean->getValueAtTime( t ) ? 1.0 : 0.0;
+				haveValue = true;
+			}
 			else if( b.choice != nullptr )
 			{
 				int option = 0;
 				b.choice->getValueAtTime( t, option );
-				// FFGL options carry their own element values; the index is
-				// only the position in the dropdown.
-				float value = (float)option;
-				if( option >= 0 && option < (int)b.spec->elementValues.size() )
-					value = (float)b.spec->elementValues[ (size_t)option ];
-				guest.setParam( index, value );
+				if( toAe )
+					value = option;// the AE side maps position -> popup value
+				else
+				{
+					// FFGL options carry their own element values; the index
+					// is only the position in the dropdown.
+					value = option;
+					if( option >= 0 && option < (int)b.spec->elementValues.size() )
+						value = b.spec->elementValues[ (size_t)option ];
+				}
+				haveValue = true;
+			}
+			else if( b.rgb != nullptr )
+			{
+				double r = 0, g = 0, bl = 0;
+				b.rgb->getValueAtTime( t, r, g, bl );
+				const unsigned packed = ( (unsigned)( r * 255.0 + 0.5 ) << 16 )
+										| ( (unsigned)( g * 255.0 + 0.5 ) << 8 )
+										| (unsigned)( bl * 255.0 + 0.5 );
+				value     = packed;
+				haveValue = true;
 			}
 			else if( b.text != nullptr )
 			{
-				std::string value;
-				b.text->getValueAtTime( t, value );
-				guest.setTextParam( index, value );
+				b.text->getValueAtTime( t, textVal );
+				haveText = true;
+			}
+
+			if( toAe )
+			{
+				if( haveValue )
+					aeGuest.setParam( index, value );
+				// AE text params are not represented yet.
+			}
+			else
+			{
+				if( haveValue )
+					guest.setParam( (FFUInt32)index, (float)value );
+				else if( haveText )
+					guest.setTextParam( (FFUInt32)index, textVal );
 			}
 		}
 	}
 
-	static void toRgba8Premult( OFX::Image& img, const OfxRectI& dstBounds, bool premultiplied,
-								uint8_t* out, int width, int height )
+	static void toRgba8( OFX::Image& img, const OfxRectI& dstBounds, bool premultiplied,
+						 bool guestPremult, uint8_t* out, int width, int height )
 	{
 		const OfxRectI b                    = img.getBounds();
 		const OFX::BitDepthEnum depth       = img.getPixelDepth();
@@ -406,9 +475,13 @@ private:
 						break;
 					}
 					}
-					if( !premultiplied && n == 4 )
+					if( guestPremult && !premultiplied && n == 4 )
 					{
 						r *= a; g *= a; bl *= a;
+					}
+					else if( !guestPremult && premultiplied && n == 4 && a > 0.0f )
+					{
+						r /= a; g /= a; bl /= a;
 					}
 				}
 				row[ x * 4 + 0 ] = (uint8_t)( std::clamp( r, 0.0f, 1.0f ) * 255.0f + 0.5f );
@@ -419,8 +492,8 @@ private:
 		}
 	}
 
-	void fromRgba8Premult( const uint8_t* in, OFX::Image& img, const OfxRectI& dstBounds,
-						   bool premultiplied, const OfxRectI& window )
+	void fromRgba8( const uint8_t* in, OFX::Image& img, const OfxRectI& dstBounds,
+					bool premultiplied, bool guestPremult, const OfxRectI& window )
 	{
 		const OFX::BitDepthEnum depth       = img.getPixelDepth();
 		const OFX::PixelComponentEnum comps = img.getPixelComponents();
@@ -436,9 +509,13 @@ private:
 				float r = p[ 0 ] / 255.0f, g = p[ 1 ] / 255.0f, bl = p[ 2 ] / 255.0f,
 					  a = p[ 3 ] / 255.0f;
 
-				if( !premultiplied && n == 4 && a > 0.0f )
+				if( guestPremult && !premultiplied && n == 4 && a > 0.0f )
 				{
 					r /= a; g /= a; bl /= a;
+				}
+				else if( !guestPremult && premultiplied && n == 4 )
+				{
+					r *= a; g *= a; bl *= a;
 				}
 
 				void* pix = img.getPixelAddress( x, y );
@@ -486,6 +563,7 @@ private:
 	std::vector< Bound > bound;
 
 	ffglguest::FfglGuest guest;
+	aeguest::AeGuest aeGuest;
 	bool guestOpen = false;
 };
 
@@ -605,6 +683,15 @@ void FfglOfxShellFactory::describeInContext( OFX::ImageEffectDescriptor& desc, O
 			if( p.type == kFile )
 				s->setStringType( OFX::eStringTypeFilePath );
 			made = s;
+			break;
+		}
+		case kColor:
+		{
+			OFX::RGBParamDescriptor* c = desc.defineRGBParam( name );
+			const unsigned packed = (unsigned)p.def;
+			c->setDefault( ( ( packed >> 16 ) & 0xff ) / 255.0, ( ( packed >> 8 ) & 0xff ) / 255.0,
+						   ( packed & 0xff ) / 255.0 );
+			made = c;
 			break;
 		}
 		case kInteger:

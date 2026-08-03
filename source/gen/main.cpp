@@ -138,6 +138,7 @@ void usage()
 			"  ofxgen list     [--dir PATH]...\n"
 			"  ofxgen generate --out DIR [--dir PATH]... [--template PATH] [--only IDENTIFIER] [--bundle PATH]\n"
 			"  ofxgen wrap-ffgl --out DIR (--bundle FFGL.bundle | --dir PATH)... [--template SHELL.ofx]\n"
+			"  ofxgen wrap-ae   --out DIR --bundle PLUGIN.plugin... [--template SHELL.ofx]\n"
 			"  ofxgen verify   BUNDLE\n" );
 }
 
@@ -375,6 +376,34 @@ int main( int argc, char** argv )
 		return result.generated > 0 ? 0 : 1;
 #else
 		fprintf( stderr, "wrap-ffgl is macOS-only for now\n" );
+		return 2;
+#endif
+	}
+
+	if( command == "wrap-ae" )
+	{
+#if OFXGEN_HAS_AE_GUEST
+		if( outDir.empty() || bundleList.empty() )
+		{
+			fprintf( stderr, "wrap-ae needs --out DIR and --bundle PLUGIN.plugin\n" );
+			return 2;
+		}
+		ofxgen::WrapFfglOptions options;
+		options.outDir    = outDir;
+		options.shellPath = templatePath.empty() ? ofxgen::findOfxShell( argv[ 0 ] ) : templatePath;
+		options.bundles   = bundleList;
+
+		const ofxgen::Result result =
+			ofxgen::wrapAe( options, []( const std::string& line ) { printf( "%s\n", line.c_str() ); } );
+		if( !result.error.empty() )
+		{
+			fprintf( stderr, "%s\n", result.error.c_str() );
+			return 1;
+		}
+		printf( "%d wrapped, %d skipped, into %s\n", result.generated, result.skipped, outDir.c_str() );
+		return result.generated > 0 ? 0 : 1;
+#else
+		fprintf( stderr, "wrap-ae is macOS-only for now\n" );
 		return 2;
 #endif
 	}

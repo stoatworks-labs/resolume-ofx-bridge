@@ -1,0 +1,20 @@
+[package]
+name = "aeguest"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+# The -sys crate is used for its pre-generated struct layouts ONLY — this is a
+# HOST, standing where After Effects normally stands, so no Adobe SDK is
+# involved on either side of the boundary. Pinned to the same rev as the
+# fleet's plugin-side work.
+[dependencies]
+after-effects-sys = { git = "https://github.com/AdrianEddy/after-effects", rev = "a393dc2aabc6ff2bd25911b36160ff5165e39cad" }
+libloading = "0.8"
+
+[profile.release]
+lto = true

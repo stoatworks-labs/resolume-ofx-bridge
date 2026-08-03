@@ -29,6 +29,8 @@ open "build/OFX Bridge.app"                                       # the app
 ./build/ofxgen generate --dir build/test-plugins --out build/generated
 ./build/ofxgen generate --bundle <one.ofx.bundle> --out DIR       # just one
 ./build/ofxgen wrap-ffgl --bundle <FFGL.bundle> --out DIR # FFGL -> OFX, the other direction
+./build/ofxgen wrap-ae --bundle <AE.plugin> --out DIR     # AE -> OFX (minimal AE host)
+# AE -> FFGL is the two composed: wrap-ae, then generate on the result
 ./build/ofxprobe --dir DIR --render com.stoatworks.ffglwrap.<name> # drive a wrapped FFGL plugin
 ./build/ofxgen verify build/generated/<Name>.bundle               # load as a host
 ./build/ffgltest build/generated/<Name>.bundle 0=0.5              # real GL
