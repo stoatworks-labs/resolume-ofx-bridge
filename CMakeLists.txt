@@ -148,6 +148,9 @@ if( APPLE )
 		source/ffglguest
 		external/ffgl/source/lib/ffgl
 	)
+	# Apple deprecated all of OpenGL in 10.14; FFGL is still OpenGL, and CI
+	# promotes the warning to an error.
+	target_compile_definitions( ffglguest PUBLIC GL_SILENCE_DEPRECATION )
 	target_link_libraries( ffglguest PUBLIC "-framework OpenGL" )
 endif()
 
