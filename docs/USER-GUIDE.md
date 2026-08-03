@@ -141,6 +141,34 @@ heading on its children, and the 0–100 ranges survive intact.
 
 ---
 
+## The other directions: FFGL and After Effects plugins in Resolve
+
+Since v0.8.0 the bridge also runs the other way. If you have an FFGL effect —
+one of the Stoatworks set, or any third-party one — `wrap-ffgl` turns it into
+an OpenFX plugin that Resolve, Vegas, Nuke and Natron load:
+
+```
+ofxgen wrap-ffgl --bundle Tinsel.bundle --out /Library/OFX/Plugins
+```
+
+And an After Effects plugin can cross too, on the bridge's built-in minimal
+AE host:
+
+```
+ofxgen wrap-ae --bundle "Luma Key.plugin" --out /Library/OFX/Plugins
+```
+
+To carry an After Effects plugin all the way into Resolume, run the two
+generators in sequence — `wrap-ae` first, then `generate` on its output.
+
+Three honesty notes. Wrapped FFGL effects render at 8 bits per channel (FFGL
+is an 8-bit world) and one at a time. Effects that keep their own clock will
+behave oddly when the host scrubs. And the AE host is deliberately minimal:
+plain CPU effects work; plugins that need GPU suites, custom UI or a licence
+check against a running After Effects are refused with the missing piece
+named in the log rather than guessed around.
+
+
 ## Troubleshooting
 
 | Symptom | Cause |
