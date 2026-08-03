@@ -6,7 +6,7 @@ if( APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES )
 	set( CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "macOS architectures" )
 endif()
 
-project( resolume-ofx-bridge VERSION 0.6.0 LANGUAGES CXX )
+project( resolume-ofx-bridge VERSION 0.7.0 LANGUAGES CXX )
 
 set( CMAKE_CXX_STANDARD 17 )
 set( CMAKE_CXX_STANDARD_REQUIRED ON )
