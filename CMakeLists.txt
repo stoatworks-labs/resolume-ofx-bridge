@@ -216,7 +216,10 @@ endif()
 # other way. Compiles the OFX Support (plugin-side) library from the vendored
 # SDK, the same eight files every fleet OFX plugin builds.
 # ---------------------------------------------------------------------------
-if( APPLE )
+# Built on every platform: this binary is what the browser wrapper serves, and
+# the Windows and Linux ones are compiled-but-never-run (see the release
+# workflow's note and docs/03-verification.md).
+if( TRUE )
 	add_library( ffglofxshell MODULE
 		source/ofxshell/FfglOfxShell.cpp
 		source/ffgl/SelfPath.cpp
@@ -240,15 +243,21 @@ if( APPLE )
 		OUTPUT_NAME "ffglofxshell"
 	)
 	target_link_libraries( ffglofxshell PRIVATE ffglguest aeguest_cpp )
+	if( WIN32 )
+		# Keep MSVC's .exp/.lib away from the other targets' output directory.
+		set_target_properties( ffglofxshell PROPERTIES
+			ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/importlib"
+			ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/importlib"
+			LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+			RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}" )
+	endif()
 endif()
 
 add_library( ofxgenlib STATIC source/gen/Generator.cpp )
 target_include_directories( ofxgenlib PUBLIC source/gen )
 target_link_libraries( ofxgenlib PUBLIC ofxbridge )
-if( APPLE )
-	target_link_libraries( ofxgenlib PUBLIC ffglguest aeguest_cpp )
-	target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 OFXGEN_HAS_AE_GUEST=1 )
-endif()
+target_link_libraries( ofxgenlib PUBLIC ffglguest aeguest_cpp )
+target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 OFXGEN_HAS_AE_GUEST=1 )
 
 # ---------------------------------------------------------------------------
 # ofxgen - the generator CLI
