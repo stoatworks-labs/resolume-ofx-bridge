@@ -20,6 +20,8 @@
 //
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -90,6 +92,9 @@ struct Manifest
 	std::vector< ManifestParam > params;
 
 	bool loaded = false;
+	/// True when there was no manifest and everything here was worked out from
+	/// the guest itself. Parameters are then read at describe time.
+	bool discovered = false;
 	std::string error;
 };
 
@@ -103,6 +108,67 @@ std::string contentsDir()
 	return bin.substr( 0, macos );
 }
 
+/// Find the guest bundle inside Contents/Guest, without being told which it
+/// is. There is exactly one, and this is what lets a wrapped bundle work with
+/// no manifest at all — the file-copying generator can then be a web page.
+std::string findGuestBundle( const std::string& contents )
+{
+	std::error_code ec;
+	const std::filesystem::path guestDir = std::filesystem::path( contents ) / "Guest";
+	for( const auto& e : std::filesystem::directory_iterator( guestDir, ec ) )
+	{
+		const std::string leaf = e.path().filename().string();
+		if( !leaf.empty() && leaf[ 0 ] != '.' )
+			return "Guest/" + leaf;
+	}
+	return {};
+}
+
+/// "ffgl" or "ae", from the guest's own Info.plist rather than from a
+/// manifest: an After Effects plugin declares CFBundlePackageType eFKT, which
+/// is static data a generator can read without executing anything — and which
+/// this shell can equally read for itself.
+std::string sniffGuestType( const std::string& contents, const std::string& guestBundle )
+{
+	const std::filesystem::path plist =
+		std::filesystem::path( contents ) / guestBundle / "Contents" / "Info.plist";
+	std::ifstream f( plist );
+	if( f )
+	{
+		const std::string text( ( std::istreambuf_iterator< char >( f ) ),
+								std::istreambuf_iterator< char >() );
+		if( text.find( "eFKT" ) != std::string::npos )
+			return "ae";
+	}
+	return "ffgl";
+}
+
+/// An OFX identifier and label for a guest nobody wrote a manifest for. The
+/// bundle's own filename is the one stable, human-meaningful name available
+/// before the guest is loaded, and the host needs the identifier during
+/// getPluginIDs — earlier than any guest can be opened safely.
+void identityFromLeaf( const std::string& guestBundle, Manifest& out )
+{
+	std::string leaf = std::filesystem::path( guestBundle ).stem().string();
+	std::string slug;
+	for( char c : leaf )
+		slug += isalnum( (unsigned char)c ) ? (char)tolower( (unsigned char)c ) : '_';
+
+	out.identifier = "com.stoatworks."
+					 + std::string( out.guestType == "ae" ? "aewrap." : "ffglwrap." ) + slug;
+	out.label      = leaf + ( out.guestType == "ae" ? " (AE)" : " (FFGL)" );
+	out.grouping   = out.guestType == "ae" ? "After Effects" : "FFGL";
+}
+
+/// Parameters discovered from the guest, cached for the process. `Bound` keeps
+/// pointers into this, so it must outlive every instance — and describe() runs
+/// long before any instance exists.
+std::vector< ManifestParam >& discoveredParamCache()
+{
+	static std::vector< ManifestParam >* cache = new std::vector< ManifestParam >();
+	return *cache;
+}
+
 const Manifest& manifest()
 {
 	static Manifest m = [] {
@@ -114,9 +180,31 @@ const Manifest& manifest()
 			return out;
 		}
 
+		// The manifest is an OVERRIDE, not a requirement. Without one the shell
+		// discovers everything itself: which guest it carries (there is one
+		// bundle in Contents/Guest), what kind it is (the guest's own
+		// Info.plist), and what parameters it has (asked of the guest at
+		// describe time, below). That is what allows a generator to be a pure
+		// file copy — including one running in a browser.
+		std::string manifestError;
 		ofxffgl::Json root;
-		if( !ofxffgl::Json::parseFile( dir + "/manifest.json", root, out.error ) )
+		const bool haveManifest =
+			ofxffgl::Json::parseFile( dir + "/manifest.json", root, manifestError );
+
+		if( !haveManifest )
+		{
+			out.guestBundle = findGuestBundle( dir );
+			if( out.guestBundle.empty() )
+			{
+				out.error = "no manifest and nothing in Contents/Guest (" + manifestError + ")";
+				return out;
+			}
+			out.guestType = sniffGuestType( dir, out.guestBundle );
+			identityFromLeaf( out.guestBundle, out );
+			out.discovered = true;
+			out.loaded     = true;
 			return out;
+		}
 
 		auto str = []( const ofxffgl::Json& j, const char* key, const std::string& fallback = {} ) {
 			const ofxffgl::Json* v = j.find( key );
@@ -225,7 +313,9 @@ public:
 		if( !m.isSource )
 			srcClip = fetchClip( kOfxImageEffectSimpleSourceClipName );
 
-		for( const ManifestParam& p : m.params )
+		const std::vector< ManifestParam >& params =
+			m.discovered ? discoveredParamCache() : m.params;
+		for( const ManifestParam& p : params )
 		{
 			Bound b;
 			b.spec = &p;
@@ -625,10 +715,75 @@ void FfglOfxShellFactory::describeInContext( OFX::ImageEffectDescriptor& desc, O
 
 	OFX::PageParamDescriptor* page = desc.definePageParam( "Controls" );
 
+	// With no manifest, ask the guest what its parameters are — here, once,
+	// at describe time. This is the same answer the generator would have
+	// baked; taking it live is what lets the generator be a file copy.
+	std::vector< ManifestParam > discoveredParams;
+	if( m.discovered )
+	{
+		const std::string path = contentsDir() + "/" + m.guestBundle;
+		std::string error;
+		if( m.guestType == "ae" )
+		{
+			aeguest::AeGuest probe;
+			if( probe.open( path, error ) )
+			{
+				for( const aeguest::GuestParam& p : probe.params() )
+				{
+					if( p.kind == "unsupported" )
+						continue;
+					ManifestParam mp;
+					mp.index = p.index;
+					mp.name  = p.name;
+					mp.type  = p.kind == "bool"    ? kBoolean
+							   : p.kind == "popup" ? kOption
+							   : p.kind == "color" ? kColor
+												   : kStandard;
+					mp.def = p.defaultValue;
+					mp.min = p.rangeMin;
+					mp.max = p.rangeMax;
+					mp.elements = p.options;
+					for( size_t e = 0; e < p.options.size(); ++e )
+						mp.elementValues.push_back( (double)e );
+					discoveredParams.push_back( std::move( mp ) );
+				}
+			}
+		}
+		else
+		{
+			ffglguest::GuestInfo info;
+			if( ffglguest::describe( path, info, error ) )
+			{
+				for( const ffglguest::GuestParam& p : info.params )
+				{
+					ManifestParam mp;
+					mp.index       = (int)p.index;
+					mp.name        = p.name;
+					mp.type        = (int)p.type;
+					mp.def         = p.defaultValue;
+					mp.min         = p.rangeMin;
+					mp.max         = p.rangeMax;
+					mp.textDefault = p.textDefault;
+					mp.group       = p.group;
+					mp.elements    = p.elements;
+					for( float v : p.elementValues )
+						mp.elementValues.push_back( v );
+					discoveredParams.push_back( std::move( mp ) );
+				}
+			}
+		}
+		if( !error.empty() )
+			fprintf( stderr, "ffglofxshell: describing guest failed: %s\n", error.c_str() );
+	}
+
+	if( m.discovered )
+		discoveredParamCache() = discoveredParams;
+	const std::vector< ManifestParam >& params = m.discovered ? discoveredParamCache() : m.params;
+
 	std::string currentGroup;
 	OFX::GroupParamDescriptor* group = nullptr;
 
-	for( const ManifestParam& p : m.params )
+	for( const ManifestParam& p : params )
 	{
 		if( p.type == kBuffer )
 			continue;
