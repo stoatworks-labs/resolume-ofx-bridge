@@ -83,3 +83,25 @@ The remaining "planned" cells put existing guests inside an After Effects
 the pipe-cleaner AE plugin has been verified inside a real After Effects,
 because an unverified host family is how silent all-plugins-broken bugs
 happen. Ask the repository's history how it knows.
+
+## Platforms
+
+| | macOS | Windows | Linux |
+|---|---|---|---|
+| FFGL guest | CGL, **run and verified** | WGL, compiled only | surfaceless EGL, compiled only |
+| After Effects guest | yes | yes, compiled only | **no — Adobe has never shipped After Effects for Linux** |
+| Desktop tools (`ofxgen`, `ofxprobe`, the app) | yes | not built | not built |
+| Browser wrapper shell | served | served | served |
+
+The Windows and Linux shells are built by CI on every release and served by
+the browser wrapper, which tells the visitor which one they are getting and
+that it is untested. They compile; nobody here has a Windows or Linux machine
+to run them on. That is a different claim from "it works", and the project
+says which one it is making.
+
+The Linux column has an honest wrinkle worth stating: FFGL is Resolume's
+format and Resolume has no Linux build, so a Linux FFGL plugin barely exists
+in the wild. The shell is there because OpenFX hosts on Linux are real
+(Natron, Nuke, Resolve) and because refusing to build it would have been a
+guess about what nobody has; it is not there because there is a queue of
+people waiting for it.
