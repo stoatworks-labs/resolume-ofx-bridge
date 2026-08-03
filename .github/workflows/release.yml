@@ -2,10 +2,11 @@ name: release
 
 # Build the OFX bridge tools and the FFGL wrapper template.
 #
-# macOS only for this release. The Windows and Linux code paths exist but have
-# never been compiled or run, and shipping a binary nobody has executed would
-# misrepresent the project's status — see docs/03-verification.md. They go in
-# once they have actually been built and tried.
+# The tools are macOS only. The shells job below also builds the FFGL->OFX
+# shell for Windows and Linux — that is what the browser wrapper serves — and
+# those are labelled compiled-not-run wherever they appear, because there is no
+# Windows or Linux machine here to execute them on. Compiling is real evidence;
+# running is the evidence we do not have. See docs/03-verification.md.
 #
 # macos-14 is arm64 and cross-compiles the x86_64 slice; the Intel macOS runners
 # are retired, so never target macos-13.
@@ -19,6 +20,60 @@ permissions:
   contents: write
 
 jobs:
+  shells:
+    name: shell-${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x86_64, os: windows-latest }
+          - { name: linux-x86_64,   os: ubuntu-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglew-dev libegl1-mesa-dev libgl1-mesa-dev libexpat1-dev
+
+      - name: Dependencies (Windows)
+        if: runner.os == 'Windows'
+        run: vcpkg install glew:x64-windows expat:x64-windows
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build the shell
+        run: cmake --build build --config Release --target ffglofxshell
+
+      - name: Collect
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shellout
+          src="build/ffglofxshell.ofx"
+          [ -f "build/Release/ffglofxshell.ofx" ] && src="build/Release/ffglofxshell.ofx"
+          cp "$src" "shellout/ffglofxshell-${{ matrix.name }}.ofx"
+          ls -l shellout
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-${{ matrix.name }}
+          path: shellout/*
+          if-no-files-found: error
+
   build:
     name: macos-universal
     runs-on: macos-14

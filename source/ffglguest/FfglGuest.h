@@ -9,9 +9,9 @@
 // bundles for testing) into a library, so that a *shell* speaking some other
 // host's plugin API can carry an FFGL effect inside it.
 //
-// Deliberately macOS-first, like the rest of the repo's GL work: the offscreen
-// context is CGL. The Windows path would be WGL with a hidden window and is
-// not written.
+// The offscreen context and the library loading live in Platform.{h,cpp}:
+// CGL on macOS, WGL on Windows, surfaceless EGL on Linux. The Windows and
+// Linux paths compile but have never been run — see Platform.h.
 //
 // What a guest cannot promise its new host:
 //
@@ -22,6 +22,8 @@
 //   - FFGL is an 8-bit world. Frames cross the boundary as RGBA8, whatever
 //     depth the outer host works in.
 //
+
+#include "Platform.h"
 
 #include <FFGL.h>
 
@@ -59,7 +61,7 @@ struct GuestInfo
 /// the bundle is opened, interrogated through plugMain, and closed again.
 bool describe( const std::string& bundlePath, GuestInfo& out, std::string& error );
 
-/// A live instance: its own dlopen handle, its own CGL context, its own
+/// A live instance: its own loaded module, its own GL context, its own
 /// textures. One FfglGuest per outer-host instance; render() is not
 /// re-entrant, and because GL contexts and drivers disagree about threads,
 /// callers that render from a thread pool must serialise (the OFX shell
@@ -105,7 +107,7 @@ private:
 	PlugMainFn plugMain  = nullptr;
 	GuestInfo guestInfo;
 
-	void* cglContext     = nullptr; //!< CGLContextObj, void* to keep CGL out of this header
+	platform::GlContext glContext;  //!< offscreen, per instance
 	FFInstanceID instance = nullptr;
 	unsigned inTexture   = 0;
 	unsigned outTexture  = 0;

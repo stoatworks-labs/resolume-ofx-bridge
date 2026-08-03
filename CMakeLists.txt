@@ -143,7 +143,10 @@ endif()
 # any-to-any matrix). macOS only: the offscreen context is CGL.
 # ---------------------------------------------------------------------------
 if( APPLE )
-	add_library( ffglguest STATIC source/ffglguest/FfglGuest.cpp )
+	add_library( ffglguest STATIC
+		source/ffglguest/FfglGuest.cpp
+		source/ffglguest/Platform.cpp
+	)
 	target_include_directories( ffglguest PUBLIC
 		source/ffglguest
 		external/ffgl/source/lib/ffgl
@@ -152,6 +155,25 @@ if( APPLE )
 	# promotes the warning to an error.
 	target_compile_definitions( ffglguest PUBLIC GL_SILENCE_DEPRECATION )
 	target_link_libraries( ffglguest PUBLIC "-framework OpenGL" )
+else()
+	add_library( ffglguest STATIC
+		source/ffglguest/FfglGuest.cpp
+		source/ffglguest/Platform.cpp
+	)
+	target_include_directories( ffglguest PUBLIC
+		source/ffglguest
+		external/ffgl/source/lib/ffgl
+	)
+	# GLEW for the entry points a core profile does not expose statically; on
+	# Linux, EGL for a context with no display attached.
+	find_package( GLEW REQUIRED )
+	target_link_libraries( ffglguest PUBLIC GLEW::GLEW )
+	if( WIN32 )
+		target_link_libraries( ffglguest PUBLIC opengl32 )
+	else()
+		find_package( OpenGL REQUIRED )
+		target_link_libraries( ffglguest PUBLIC OpenGL::GL EGL )
+	endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -159,7 +181,7 @@ endif()
 # layouts from the community -sys bindings) behind a narrow C ABI, plus the
 # C++ face in source/aeguest/. Universal via two cargo targets + lipo.
 # ---------------------------------------------------------------------------
-if( APPLE )
+if( TRUE )
 	set( AEGUEST_TARGET_DIR "${CMAKE_BINARY_DIR}/aeguest-target" )
 	set( AEGUEST_A "${CMAKE_BINARY_DIR}/libaeguest_universal.a" )
 	add_custom_command(

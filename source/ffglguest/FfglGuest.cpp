@@ -1,29 +1,20 @@
 #include "FfglGuest.h"
 
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/gl3.h>
+#include "Platform.h"
+
+#if defined( __APPLE__ )
+	#include <OpenGL/gl3.h>
+#else
+	#include <GL/glew.h>
+#endif
 
 #include <cstring>
-#include <dlfcn.h>
 #include <filesystem>
 
 namespace fs = std::filesystem;
 
 namespace ffglguest {
 namespace {
-
-std::string findBinary( const std::string& bundlePath )
-{
-	std::error_code ec;
-	fs::path p = bundlePath;
-	if( !fs::is_directory( p, ec ) )
-		return p.string();
-
-	const fs::path macos = p / "Contents" / "MacOS";
-	for( const auto& e : fs::directory_iterator( macos, ec ) )
-		return e.path().string();
-	return std::string();
-}
 
 /// FFGL hands strings back as pointers into the plugin's own memory, length
 /// implied — FF_GET_INFO's name field is famously NOT NUL-terminated at 16
@@ -36,38 +27,6 @@ std::string boundedString( const char* s, size_t maxLen )
 	while( n < maxLen && s[ n ] != '\0' )
 		++n;
 	return std::string( s, n );
-}
-
-CGLContextObj createCoreContext( std::string& error )
-{
-	// 4.1 core — what Resolume uses on macOS, and what every fleet plugin's
-	// shaders declare. See ffgltest for the legacy story; a guest that needs
-	// immediate-mode GL cannot work in a core profile and is not supported.
-	CGLPixelFormatAttribute attrs[] = {
-		kCGLPFAOpenGLProfile,
-		(CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core,
-		kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
-		kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
-		(CGLPixelFormatAttribute)0
-	};
-
-	CGLPixelFormatObj pix = nullptr;
-	GLint npix            = 0;
-	if( CGLChoosePixelFormat( attrs, &pix, &npix ) != kCGLNoError || pix == nullptr )
-	{
-		error = "no suitable GL pixel format";
-		return nullptr;
-	}
-
-	CGLContextObj ctx  = nullptr;
-	const CGLError err = CGLCreateContext( pix, nullptr, &ctx );
-	CGLDestroyPixelFormat( pix );
-	if( err != kCGLNoError || ctx == nullptr )
-	{
-		error = "CGLCreateContext failed (" + std::to_string( err ) + ")";
-		return nullptr;
-	}
-	return ctx;
 }
 
 using PlugMainFn = FFMixed ( * )( FFUInt32, FFMixed, FFInstanceID );
@@ -174,35 +133,19 @@ bool readInfo( PlugMainFn plugMain, GuestInfo& out, std::string& error )
 
 bool describe( const std::string& bundlePath, GuestInfo& out, std::string& error )
 {
-	const std::string binary = findBinary( bundlePath );
-	if( binary.empty() )
-	{
-		error = "no executable inside " + bundlePath;
+	platform::Module module;
+	if( !module.load( bundlePath, error ) )
 		return false;
-	}
 
-	void* handle = dlopen( binary.c_str(), RTLD_NOW | RTLD_LOCAL );
-	if( handle == nullptr )
-	{
-		error = std::string( "dlopen: " ) + dlerror();
-		return false;
-	}
-
-	auto plugMain = reinterpret_cast< PlugMainFn >( dlsym( handle, "plugMain" ) );
+	auto plugMain = reinterpret_cast< PlugMainFn >( module.symbol( "plugMain" ) );
 	if( plugMain == nullptr )
 	{
 		error = "plugMain not exported — not an FFGL plugin";
-		dlclose( handle );
 		return false;
 	}
 
-	const bool ok = readInfo( plugMain, out, error );
-
-	// Closing after metadata-only queries is safe for well-behaved plugins;
-	// the exit-time-destructor trap only bites when the *process* exits with
-	// the module gone, and describe() callers are tools, not shows.
-	dlclose( handle );
-	return ok;
+	// The module is deliberately left loaded; see the destructor's note.
+	return readInfo( plugMain, out, error );
 }
 
 FfglGuest::~FfglGuest()
@@ -217,21 +160,12 @@ FfglGuest::~FfglGuest()
 
 bool FfglGuest::open( const std::string& bundlePath, std::string& error )
 {
-	const std::string binary = findBinary( bundlePath );
-	if( binary.empty() )
-	{
-		error = "no executable inside " + bundlePath;
+	platform::Module module;
+	if( !module.load( bundlePath, error ) )
 		return false;
-	}
+	dlHandle = module.handle;
 
-	dlHandle = dlopen( binary.c_str(), RTLD_NOW | RTLD_LOCAL );
-	if( dlHandle == nullptr )
-	{
-		error = std::string( "dlopen: " ) + dlerror();
-		return false;
-	}
-
-	plugMain = reinterpret_cast< PlugMainFn >( dlsym( dlHandle, "plugMain" ) );
+	plugMain = reinterpret_cast< PlugMainFn >( module.symbol( "plugMain" ) );
 	if( plugMain == nullptr )
 	{
 		error = "plugMain not exported — not an FFGL plugin";
@@ -243,10 +177,10 @@ bool FfglGuest::open( const std::string& bundlePath, std::string& error )
 
 void FfglGuest::destroyInstance()
 {
-	if( cglContext == nullptr )
+	if( !glContext.valid() )
 		return;
 
-	CGLSetCurrentContext( (CGLContextObj)cglContext );
+	glContext.makeCurrent();
 
 	if( instance != nullptr && plugMain != nullptr )
 	{
@@ -264,24 +198,20 @@ void FfglGuest::destroyInstance()
 		glDeleteTextures( 1, &outTexture );
 	hostFbo = inTexture = outTexture = 0;
 
-	CGLSetCurrentContext( nullptr );
-	CGLDestroyContext( (CGLContextObj)cglContext );
-	cglContext = nullptr;
+	glContext.destroy();
 	width = height = 0;
 }
 
 bool FfglGuest::ensureInstance( int newWidth, int newHeight, std::string& error )
 {
-	if( cglContext != nullptr && width == newWidth && height == newHeight )
+	if( glContext.valid() && width == newWidth && height == newHeight )
 		return true;
 
 	destroyInstance();
 
-	CGLContextObj ctx = createCoreContext( error );
-	if( ctx == nullptr )
+	if( !glContext.create( error ) )
 		return false;
-	cglContext = ctx;
-	CGLSetCurrentContext( ctx );
+	glContext.makeCurrent();
 
 	width  = newWidth;
 	height = newHeight;
@@ -321,7 +251,7 @@ bool FfglGuest::ensureInstance( int newWidth, int newHeight, std::string& error 
 	}
 	instance = instResult.PointerValue;
 
-	CGLSetCurrentContext( nullptr );
+	glContext.clearCurrent();
 	return true;
 }
 
@@ -356,13 +286,13 @@ void FfglGuest::setTime( double seconds )
 
 bool FfglGuest::render( const uint8_t* rgbaIn, uint8_t* rgbaOut, std::string& error )
 {
-	if( instance == nullptr || cglContext == nullptr )
+	if( instance == nullptr || !glContext.valid() )
 	{
 		error = "no instance";
 		return false;
 	}
 
-	CGLSetCurrentContext( (CGLContextObj)cglContext );
+	glContext.makeCurrent();
 
 	if( pendingTime >= 0.0 )
 	{
@@ -405,7 +335,7 @@ bool FfglGuest::render( const uint8_t* rgbaIn, uint8_t* rgbaOut, std::string& er
 	if( plugMain( FF_PROCESS_OPENGL, pglArg, instance ).UIntValue == FF_FAIL )
 	{
 		error = "FF_PROCESS_OPENGL returned FF_FAIL";
-		CGLSetCurrentContext( nullptr );
+		glContext.clearCurrent();
 		return false;
 	}
 
@@ -414,7 +344,7 @@ bool FfglGuest::render( const uint8_t* rgbaIn, uint8_t* rgbaOut, std::string& er
 	glReadPixels( 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgbaOut );
 
 	const GLenum glErr = glGetError();
-	CGLSetCurrentContext( nullptr );
+	glContext.clearCurrent();
 
 	if( glErr != GL_NO_ERROR )
 	{
