@@ -183,22 +183,42 @@ endif()
 # ---------------------------------------------------------------------------
 if( TRUE )
 	set( AEGUEST_TARGET_DIR "${CMAKE_BINARY_DIR}/aeguest-target" )
-	set( AEGUEST_A "${CMAKE_BINARY_DIR}/libaeguest_universal.a" )
-	add_custom_command(
-		OUTPUT "${AEGUEST_A}"
-		# CI runners ship one Rust target; the other half of universal needs
-		# adding. Harmless when already present.
-		COMMAND rustup target add aarch64-apple-darwin x86_64-apple-darwin
-		COMMAND cargo build --release --target aarch64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
-		COMMAND cargo build --release --target x86_64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
-		COMMAND lipo "${AEGUEST_TARGET_DIR}/aarch64-apple-darwin/release/libaeguest.a"
-					 "${AEGUEST_TARGET_DIR}/x86_64-apple-darwin/release/libaeguest.a"
-					 -create -output "${AEGUEST_A}"
-		WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/aeguest"
-		DEPENDS aeguest/src/lib.rs aeguest/Cargo.toml
-		COMMENT "cargo: aeguest (universal)"
-		VERBATIM
-	)
+
+	if( APPLE )
+		# Two slices and lipo, because a plugin has to load in both flavours of
+		# host. `rustup target add` because CI runners ship only one target;
+		# harmless when they are already present.
+		set( AEGUEST_A "${CMAKE_BINARY_DIR}/libaeguest_universal.a" )
+		add_custom_command(
+			OUTPUT "${AEGUEST_A}"
+			COMMAND rustup target add aarch64-apple-darwin x86_64-apple-darwin
+			COMMAND cargo build --release --target aarch64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
+			COMMAND cargo build --release --target x86_64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
+			COMMAND lipo "${AEGUEST_TARGET_DIR}/aarch64-apple-darwin/release/libaeguest.a"
+						 "${AEGUEST_TARGET_DIR}/x86_64-apple-darwin/release/libaeguest.a"
+						 -create -output "${AEGUEST_A}"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/aeguest"
+			DEPENDS aeguest/src/lib.rs aeguest/Cargo.toml
+			COMMENT "cargo: aeguest (universal)"
+			VERBATIM
+		)
+	else()
+		# One native slice, and no lipo — which does not exist off macOS and
+		# whose absence surfaces only as a bare "Error 127".
+		if( WIN32 )
+			set( AEGUEST_A "${AEGUEST_TARGET_DIR}/release/aeguest.lib" )
+		else()
+			set( AEGUEST_A "${AEGUEST_TARGET_DIR}/release/libaeguest.a" )
+		endif()
+		add_custom_command(
+			OUTPUT "${AEGUEST_A}"
+			COMMAND cargo build --release --target-dir "${AEGUEST_TARGET_DIR}"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/aeguest"
+			DEPENDS aeguest/src/lib.rs aeguest/Cargo.toml
+			COMMENT "cargo: aeguest (native)"
+			VERBATIM
+		)
+	endif()
 	add_custom_target( aeguest_rust DEPENDS "${AEGUEST_A}" )
 
 	add_library( bridgejson STATIC source/ffgl/Json.cpp )
@@ -207,6 +227,13 @@ if( TRUE )
 	add_library( aeguest_cpp STATIC source/aeguest/AeGuest.cpp )
 	target_include_directories( aeguest_cpp PUBLIC source/aeguest )
 	target_link_libraries( aeguest_cpp PUBLIC bridgejson "${AEGUEST_A}" )
+	if( WIN32 )
+		# What the Rust standard library needs from Windows when linked into a
+		# C++ target rather than built by cargo's own linker invocation.
+		target_link_libraries( aeguest_cpp PUBLIC ntdll userenv ws2_32 bcrypt advapi32 )
+	elseif( NOT APPLE )
+		target_link_libraries( aeguest_cpp PUBLIC dl pthread )
+	endif()
 	add_dependencies( aeguest_cpp aeguest_rust )
 endif()
 
