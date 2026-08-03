@@ -164,6 +164,9 @@ if( APPLE )
 	set( AEGUEST_A "${CMAKE_BINARY_DIR}/libaeguest_universal.a" )
 	add_custom_command(
 		OUTPUT "${AEGUEST_A}"
+		# CI runners ship one Rust target; the other half of universal needs
+		# adding. Harmless when already present.
+		COMMAND rustup target add aarch64-apple-darwin x86_64-apple-darwin
 		COMMAND cargo build --release --target aarch64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
 		COMMAND cargo build --release --target x86_64-apple-darwin --target-dir "${AEGUEST_TARGET_DIR}"
 		COMMAND lipo "${AEGUEST_TARGET_DIR}/aarch64-apple-darwin/release/libaeguest.a"
