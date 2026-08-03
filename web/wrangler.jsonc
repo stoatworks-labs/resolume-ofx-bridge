@@ -1,0 +1,14 @@
+// OFX Bridge web wrapper — static-assets-only Worker.
+//
+// Everything happens in the visitor's browser: the shell binary below is a
+// static asset the page fetches and writes into the bundle it assembles. No
+// plugin is ever uploaded anywhere.
+//
+// Deploy from web/: cf-run npx wrangler deploy  (see reference_cloudflare_access)
+{
+  "name": "ofx-bridge-web",
+  "compatibility_date": "2026-08-03",
+  "assets": {
+    "directory": "./public"
+  }
+}

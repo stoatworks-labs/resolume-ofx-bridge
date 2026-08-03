@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OFX Bridge — wrap a plugin in your browser</title>
+<meta name="description" content="Turn an FFGL or After Effects plugin into an OpenFX plugin for DaVinci Resolve, entirely in your browser. Nothing is uploaded.">
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1d2026;
+    --panel2: #23272f;
+    --border: #32363e;
+    --text: #d6d9de;
+    --dim: #8a8f98;
+    --accent: #e8b84b;
+    --accent2: #59c2ff;
+    --danger: #ff5d5d;
+    --ok: #63c98a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif; }
+  main { max-width: 780px; margin: 0 auto; padding: 32px 20px 8px; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--dim); font-weight: 600;
+       text-transform: uppercase; letter-spacing: 0.06em; }
+  .sub { color: var(--dim); margin: 0 0 26px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+           padding: 18px 20px; margin-bottom: 16px; }
+  .step { display: flex; gap: 14px; align-items: flex-start; }
+  .num { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--panel2);
+         color: var(--dim); display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+  .step.done .num { background: var(--ok); color: #10240f; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  button { font: inherit; font-weight: 600; padding: 9px 16px; border-radius: 7px;
+           background: var(--accent); color: #1a1408; border: none; cursor: pointer; }
+  button:disabled { background: var(--panel2); color: var(--dim); cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--accent2); border: 1px solid var(--border); }
+  .chosen { color: var(--dim); font-size: 13px; margin-top: 7px; word-break: break-all; }
+  .chosen b { color: var(--text); font-weight: 600; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  pre { background: var(--panel2); border: 1px solid var(--border); border-radius: 7px;
+        padding: 11px 13px; overflow-x: auto; margin: 10px 0 0; }
+  .log { margin-top: 14px; }
+  .log div { padding: 2px 0; color: var(--dim); font-size: 13px; }
+  .log div.ok::before { content: "✓ "; color: var(--ok); }
+  .log div.err { color: var(--danger); }
+  .badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 20px;
+           background: var(--panel2); color: var(--dim); margin-left: 8px; }
+  .unsupported { border-color: var(--danger); }
+  footer { max-width: 780px; margin: 0 auto; padding: 8px 20px 60px; color: var(--dim); font-size: 13.5px; }
+  footer h2 { color: var(--danger); }
+  footer .warn { background: var(--panel); border: 1px solid var(--border);
+                 border-left: 3px solid var(--danger); border-radius: 8px; padding: 16px 18px; }
+  footer ul { margin: 10px 0 0; padding-left: 20px; }
+  footer li { margin-bottom: 7px; }
+  footer a { color: var(--accent2); }
+  .cta { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Wrap a plugin, in your browser</h1>
+  <p class="sub">
+    Turn an <b>FFGL</b> plugin (Resolume) or an <b>After Effects</b> plugin into an
+    <b>OpenFX</b> plugin for DaVinci Resolve, Vegas, Nuke and Natron. Everything happens
+    on your own machine — your plugin is never uploaded anywhere, and there is nothing
+    to install to do it.
+  </p>
+
+  <div class="panel" id="unsupported" hidden>
+    <h2 style="color:var(--danger)">This browser can't do it</h2>
+    <p style="margin:0">
+      Assembling a plugin bundle needs the File System Access API, which today means
+      Chrome or Edge on a desktop. Safari and Firefox can't write folders from a page.
+      Use the desktop build instead — link at the bottom.
+    </p>
+  </div>
+
+  <div class="panel" id="step1">
+    <div class="step" id="step1row">
+      <div class="num">1</div>
+      <div class="grow">
+        <h2>Choose the plugin to wrap</h2>
+        <button id="pickGuest">Choose plugin bundle…</button>
+        <div class="chosen" id="guestInfo">
+          A <code>.bundle</code> (FFGL) or <code>.plugin</code> (After Effects) folder.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="step2">
+    <div class="step" id="step2row">
+      <div class="num">2</div>
+      <div class="grow">
+        <h2>Choose where it goes</h2>
+        <button id="pickOut" disabled>Choose output folder…</button>
+        <div class="chosen" id="outInfo">
+          Pick any folder — your Downloads is fine. macOS won't let a browser write
+          straight into <code>/Library/OFX/Plugins</code>, so you'll move it there
+          with the command below.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="step3">
+    <div class="step" id="step3row">
+      <div class="num">3</div>
+      <div class="grow">
+        <h2>Build it</h2>
+        <button id="build" disabled>Build the OpenFX plugin</button>
+        <div class="log" id="log"></div>
+        <div id="after" hidden>
+          <p style="margin:14px 0 0">
+            Now install it. macOS quarantines everything a browser writes, and a
+            quarantined plugin does not load at all — the host reports a code-signature
+            policy error, or just never lists it. Clearing the flag is not optional:
+          </p>
+          <pre id="installCmd"></pre>
+          <p style="margin:10px 0 0; font-size:13px; color:var(--dim)">
+            Then restart the host. It appears under OpenFX → Stoatworks.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="warn">
+    <h2>What this page can't do</h2>
+    <p style="margin:0">
+      This is a file copier. It assembles a bundle and hands it to you — it never runs
+      your plugin, because a browser cannot execute native code. That has consequences
+      worth knowing before you rely on it:
+    </p>
+    <ul>
+      <li>
+        <b>It cannot tell you whether your plugin will work.</b> The desktop build loads
+        each plugin and reports the real reason it can't be wrapped — an effect that
+        needs a GPU suite, an After Effects plugin wanting services this bridge doesn't
+        provide, a plugin with no filter context. Here, that same plugin builds happily
+        and then simply doesn't appear in your host, with nothing to explain why.
+      </li>
+      <li>
+        <b>Chrome or Edge, on a desktop, only.</b> No other browser can write a folder.
+      </li>
+      <li>
+        <b>macOS, Apple Silicon and Intel.</b> Windows and Linux shells aren't built yet.
+      </li>
+      <li>
+        <b>You still need one Terminal command.</b> Everything a browser writes is
+        quarantined, and a quarantined plugin is refused by macOS at load — measured,
+        not assumed. No browser API can clear it, so the <code>xattr</code> line above
+        is a required step, not a suggestion.
+      </li>
+      <li>
+        <b>The wrapped plugin carries the usual crossing costs</b> — FFGL guests render at
+        8 bits per channel and one frame at a time, and an effect that keeps its own
+        clock will behave oddly when the host scrubs.
+      </li>
+    </ul>
+    <div class="cta">
+      <b>The desktop build does all of this and diagnoses it too</b> — it also wraps
+      OpenFX plugins <i>into</i> Resolume, which this page cannot.
+      <a href="https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest">Download OFX Bridge for macOS</a>
+      ·
+      <a href="https://stoatworks-labs.com/software/resolume-ofx-bridge/">What it is</a>
+      ·
+      <a href="https://github.com/stoatworks-labs/resolume-ofx-bridge">Source (MIT)</a>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
