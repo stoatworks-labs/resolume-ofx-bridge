@@ -44,6 +44,19 @@ All builds, checksums and release notes: [github.com/stoatworks-labs/resolume-of
 
 <!-- downloads:end -->
 
+## Or wrap a plugin in your browser
+
+[**ofx-bridge.stoatworks-labs.com**](https://ofx-bridge.stoatworks-labs.com) — nothing to
+install, nothing uploaded. Because the shells describe their own guest when the host
+loads them, assembling a wrapped plugin is a pure file copy, so a page can do it: pick
+the FFGL or After Effects bundle, pick an output folder, done.
+
+It cannot do what this build does — it never runs your plugin, so it cannot tell you
+*why* one won't wrap, it is Chrome/Edge and macOS only, and macOS quarantines anything a
+browser writes, so one `xattr -dr` is required before the plugin will load. The page
+says all of that itself.
+
+
 ## What it looks like
 
 Real output from the OpenFX `Invert` example, rendered through the generated FFGL
