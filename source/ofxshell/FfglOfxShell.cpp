@@ -34,7 +34,9 @@
 
 #include "../ffgl/Json.h"
 #include "../ffgl/SelfPath.h"
-#include "../aeguest/AeGuest.h"
+#if BRIDGE_HAS_AE_GUEST
+	#include "../aeguest/AeGuest.h"
+#endif
 #include "../ffglguest/FfglGuest.h"
 
 namespace
@@ -377,7 +379,18 @@ public:
 		if( !guestOpen )
 		{
 			const std::string path = contentsDir() + "/" + m.guestBundle;
+#if BRIDGE_HAS_AE_GUEST
 			const bool ok = toAe ? aeGuest.open( path, error ) : guest.open( path, error );
+#else
+			// No After Effects on this platform, so no AE guest was built.
+			if( toAe )
+			{
+				fprintf( stderr, "ffglofxshell: this build carries no After Effects guest "
+								 "(there is no After Effects on this platform)\n" );
+				OFX::throwSuiteStatusException( kOfxStatErrUnsupported );
+			}
+			const bool ok = guest.open( path, error );
+#endif
 			if( !ok )
 				OFX::throwSuiteStatusException( kOfxStatFailed );
 			guestOpen = true;
@@ -399,6 +412,7 @@ public:
 		}
 		std::vector< uint8_t > outFrame( (size_t)width * height * 4 );
 
+#if BRIDGE_HAS_AE_GUEST
 		if( toAe )
 		{
 			pushParams( args.time, true );
@@ -407,6 +421,7 @@ public:
 				OFX::throwSuiteStatusException( kOfxStatFailed );
 		}
 		else
+#endif
 		{
 			if( !guest.ensureInstance( width, height, error ) )
 				OFX::throwSuiteStatusException( kOfxStatFailed );
@@ -653,7 +668,9 @@ private:
 	std::vector< Bound > bound;
 
 	ffglguest::FfglGuest guest;
+#if BRIDGE_HAS_AE_GUEST
 	aeguest::AeGuest aeGuest;
+#endif
 	bool guestOpen = false;
 };
 
@@ -723,6 +740,7 @@ void FfglOfxShellFactory::describeInContext( OFX::ImageEffectDescriptor& desc, O
 	{
 		const std::string path = contentsDir() + "/" + m.guestBundle;
 		std::string error;
+#if BRIDGE_HAS_AE_GUEST
 		if( m.guestType == "ae" )
 		{
 			aeguest::AeGuest probe;
@@ -750,6 +768,7 @@ void FfglOfxShellFactory::describeInContext( OFX::ImageEffectDescriptor& desc, O
 			}
 		}
 		else
+#endif
 		{
 			ffglguest::GuestInfo info;
 			if( ffglguest::describe( path, info, error ) )

@@ -181,7 +181,15 @@ endif()
 # layouts from the community -sys bindings) behind a narrow C ABI, plus the
 # C++ face in source/aeguest/. Universal via two cargo targets + lipo.
 # ---------------------------------------------------------------------------
-if( TRUE )
+add_library( bridgejson STATIC source/ffgl/Json.cpp )
+target_include_directories( bridgejson PUBLIC source/ffgl )
+
+# After Effects runs on macOS and Windows and nowhere else, and the community
+# -sys crate ships bindings for exactly those two. So the AE guest is not built
+# on Linux — not as a limitation, but because there is no such thing as a Linux
+# After Effects plugin to carry.
+if( APPLE OR WIN32 )
+	set( BRIDGE_HAS_AE_GUEST ON )
 	set( AEGUEST_TARGET_DIR "${CMAKE_BINARY_DIR}/aeguest-target" )
 
 	if( APPLE )
@@ -220,9 +228,6 @@ if( TRUE )
 		)
 	endif()
 	add_custom_target( aeguest_rust DEPENDS "${AEGUEST_A}" )
-
-	add_library( bridgejson STATIC source/ffgl/Json.cpp )
-	target_include_directories( bridgejson PUBLIC source/ffgl )
 
 	add_library( aeguest_cpp STATIC source/aeguest/AeGuest.cpp )
 	target_include_directories( aeguest_cpp PUBLIC source/aeguest )
@@ -269,7 +274,14 @@ if( TRUE )
 		SUFFIX ".ofx"
 		OUTPUT_NAME "ffglofxshell"
 	)
-	target_link_libraries( ffglofxshell PRIVATE ffglguest aeguest_cpp )
+	target_link_libraries( ffglofxshell PRIVATE ffglguest )
+	if( BRIDGE_HAS_AE_GUEST )
+		target_link_libraries( ffglofxshell PRIVATE aeguest_cpp )
+		target_compile_definitions( ffglofxshell PRIVATE BRIDGE_HAS_AE_GUEST=1 )
+	else()
+		# Linux still needs the JSON reader the manifest path uses.
+		target_link_libraries( ffglofxshell PRIVATE bridgejson )
+	endif()
 	if( WIN32 )
 		# Keep MSVC's .exp/.lib away from the other targets' output directory.
 		set_target_properties( ffglofxshell PROPERTIES
@@ -283,8 +295,12 @@ endif()
 add_library( ofxgenlib STATIC source/gen/Generator.cpp )
 target_include_directories( ofxgenlib PUBLIC source/gen )
 target_link_libraries( ofxgenlib PUBLIC ofxbridge )
-target_link_libraries( ofxgenlib PUBLIC ffglguest aeguest_cpp )
-target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 OFXGEN_HAS_AE_GUEST=1 )
+target_link_libraries( ofxgenlib PUBLIC ffglguest )
+target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_FFGL_GUEST=1 )
+if( BRIDGE_HAS_AE_GUEST )
+	target_link_libraries( ofxgenlib PUBLIC aeguest_cpp )
+	target_compile_definitions( ofxgenlib PUBLIC OFXGEN_HAS_AE_GUEST=1 )
+endif()
 
 # ---------------------------------------------------------------------------
 # ofxgen - the generator CLI
