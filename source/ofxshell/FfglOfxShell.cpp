@@ -525,9 +525,14 @@ private:
 
 			if( toAe )
 			{
+#if BRIDGE_HAS_AE_GUEST
 				if( haveValue )
 					aeGuest.setParam( index, value );
 				// AE text params are not represented yet.
+#else
+				(void)index;
+				(void)value;
+#endif
 			}
 			else
 			{
