@@ -9,7 +9,45 @@
 // Deliberately no build step and no framework: a page whose entire argument is
 // "you don't have to install anything" should be readable in one file.
 
-const SHELL_URL = './shells/ffglofxshell-macos-universal.ofx';
+/**
+ * Which shell binary to serve, from the visitor's own platform.
+ *
+ * The wrapped plugin runs on THEIR machine, so this has to match the host they
+ * will load it in — not the machine that built the page. `platform` is the
+ * modern replacement for the userAgent sniffing this would otherwise need.
+ */
+const SHELLS = {
+  macos: {
+    url: './shells/ffglofxshell-macos-universal.ofx',
+    label: 'macOS (Apple Silicon + Intel)',
+    ext: '.ofx.bundle',
+    tested: true,
+  },
+  windows: {
+    url: './shells/ffglofxshell-windows-x86_64.ofx',
+    label: 'Windows x64',
+    ext: '.ofx.bundle',
+    tested: false,
+  },
+  linux: {
+    url: './shells/ffglofxshell-linux-x86_64.ofx',
+    label: 'Linux x64',
+    ext: '.ofx.bundle',
+    tested: false,
+    noAe: true,
+  },
+};
+
+function detectPlatform() {
+  const p = (navigator.userAgentData?.platform || navigator.platform || '').toLowerCase();
+  if (p.includes('win')) return 'windows';
+  if (p.includes('linux') || p.includes('android')) return 'linux';
+  return 'macos';
+}
+
+const PLATFORM = detectPlatform();
+const SHELL = SHELLS[PLATFORM];
+const SHELL_URL = SHELL.url;
 
 const el = (id) => document.getElementById(id);
 const log = (msg, cls = '') => {
@@ -23,6 +61,19 @@ let guestHandle = null;   // FileSystemDirectoryHandle for the .bundle/.plugin
 let guestName = '';       // e.g. "Tinsel.bundle"
 let guestKind = 'ffgl';   // 'ffgl' | 'ae'
 let outHandle = null;
+
+// State the platform up front. A visitor on Windows should not have to guess
+// whether the thing they just built is for their machine.
+{
+  const note = document.getElementById('platformNote');
+  if (note) {
+    note.innerHTML = SHELL.tested
+      ? `Building for <b>${SHELL.label}</b>.`
+      : `Building for <b>${SHELL.label}</b> — <span class="warnInline">this shell compiles but ` +
+        `has never been run by its author</span>, so treat it as untested.` +
+        (SHELL.noAe ? ' It carries FFGL plugins only: After Effects has no Linux version.' : '');
+  }
+}
 
 if (!('showDirectoryPicker' in window)) {
   el('unsupported').hidden = false;
@@ -175,10 +226,16 @@ el('build').addEventListener('click', async () => {
     // No path is available from the File System Access API — only the folder's
     // name — so the command shows that and invites the drag, which is how a
     // person gets a real path into Terminal anyway.
+    // Quarantine is a macOS idea; the other two just need the bundle moved.
     el('installCmd').textContent =
-      `# tip: type the command, then drag ${bundleName} from Finder onto the window\n` +
-      `xattr -dr com.apple.quarantine <${outHandle.name}>/${bundleName}\n` +
-      `sudo cp -R <${outHandle.name}>/${bundleName} /Library/OFX/Plugins/`;
+      PLATFORM === 'macos'
+        ? `# tip: type the command, then drag ${bundleName} from Finder onto the window\n` +
+          `xattr -dr com.apple.quarantine <${outHandle.name}>/${bundleName}\n` +
+          `sudo cp -R <${outHandle.name}>/${bundleName} /Library/OFX/Plugins/`
+        : PLATFORM === 'windows'
+        ? `move "<${outHandle.name}>\\${bundleName}" ^\n` +
+          `  "C:\\Program Files\\Common Files\\OFX\\Plugins\\${bundleName}"`
+        : `sudo cp -R <${outHandle.name}>/${bundleName} /usr/OFX/Plugins/`;
     el('after').hidden = false;
     el('step3row').classList.add('done');
   } catch (e) {
