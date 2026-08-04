@@ -5,6 +5,90 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-08-03
+
+### Added
+
+- **The any-to-any matrix, written down.** AGENTS.md now draws which host can carry
+  which guest, and a video and its thumbnail show the chain working.
+
+### Changed
+
+- The download block regenerated against the release.
+
+## [0.8.0] — 2026-08-03
+
+### Added
+
+- **After Effects as a guest — the last two cells of the matrix.** `source/aeguest/` is
+  a minimal AE effect *host* in Rust over the community `-sys` bindings, with no Adobe
+  SDK: GLOBAL_SETUP / PARAMS_SETUP / RENDER, the `add_param` interact callback, the
+  iterate util callback, the pica Handle Suite, and round-tripped global data. Unknown
+  suite requests are refused **by name** to stderr, so extending it stays evidence-driven.
+  One Adobe quirk earned a comment in the source: `kPFHandleSuiteVersion1` is literally 2.
+- **`ofxgen wrap-ae`** wraps a `.plugin` as a self-contained OFX bundle through the same
+  shell as `wrap-ffgl`, dispatching on the manifest's `guestType`. AE gets straight
+  colour where FFGL gets premultiplied, and colour parameters cross as packed RGB.
+  AE→FFGL is the two bridges composed: `wrap-ae`, then `generate` on the result.
+
+### Fixed
+
+- `rustup target add` now runs before the `aeguest` universal build; CI ships one target.
+- The OpenGL deprecation warning on `ffglguest` is silenced — CI promotes it to an error.
+
+## [0.7.0] — 2026-08-03
+
+### Added
+
+- **The other direction: FFGL plugins wrapped as OpenFX bundles.** The founding
+  architecture — a prebuilt self-configuring shell, a sidecar manifest, and a generator
+  that is really a file-copier — turned out to be direction-agnostic, so this is the
+  FFGL→OFX cell of an any-to-any matrix. `source/ffglguest/` hosts an FFGL plugin as a
+  guest: it dlopens the bundle, reads its parameter table over `plugMain`, and pushes
+  frames through `ProcessOpenGL` in a private offscreen CGL context. `source/ofxshell/`
+  is the generic OFX plugin that carries one — parameters declared from the manifest
+  (FFGL types map up cleanly: options become choices, events become pushbuttons, 2.2
+  ranges are honoured), frames crossing as premultiplied RGBA8, renders serialised by a
+  global mutex. `ofxgen wrap-ffgl` writes a self-contained `.ofx.bundle` with the
+  untouched guest inside `Contents/Guest`.
+
+  Verified end to end through `ofxprobe`: a wrapped Tinsel renders its real GLSL and
+  matches the native CPU port visually, and a wrapped Luma Key agrees with the
+  hand-written OFX port byte-for-byte on the probe frame.
+
+### Changed
+
+- Parameter edits are delivered as `instanceChanged` actions, and writes made by the
+  plugin are forwarded back.
+
+## [0.6.0] — 2026-08-03
+
+### Added
+
+- **An About surface.** Product name, version, and a button each for the user guide, the
+  project page, the source and the support page. Deliberately **not** a window: FFGL 2.x
+  has none and cannot make one — a plugin declares parameters, Resolume draws them in
+  Resolume's layout, and that is the entire surface a plugin gets. So it is a text
+  parameter carrying name and version, plus an event parameter per link, which the host
+  draws as a button.
+- A user guide, and a Download section with direct per-platform links.
+
+### Fixed
+
+- **Every generated plugin failed to instantiate** after the About surface landed.
+- **The exit-time teardown crash.** `createEffect` kept its plugin caches in
+  function-local statics, destroyed at process exit — and at exit each plugin module's
+  own finalizers run *before* ours, destroying the plugin-side state a Support-library
+  plugin still points the cache at. `~PluginCache`'s `kOfxActionUnload` then called
+  through freed memory and died at PC=0. Raw-C plugins survived, which made it look
+  plugin-specific; it wasn't. The caches are now deliberately leaked, which is the
+  standard shape for process-lifetime singletons — a host is not required to send
+  Unload on its way out.
+
+### Changed
+
+- `ofxprobe` grows `--size WxH` and `--out FILE.bmp` (input and output side by side).
+
 ## [0.5.1] — 2026-07-31
 
 ### Changed
