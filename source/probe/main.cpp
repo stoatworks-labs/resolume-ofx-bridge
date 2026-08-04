@@ -49,7 +49,7 @@ std::vector< double > parseValues( const char* text )
 void usage()
 {
 	printf( "usage: ofxprobe [--dir PATH]... [--json] [--manifest IDENTIFIER] [--render IDENTIFIER]\n"
-			"                [--set name=value]... [--edit name=value]... [--size WxH] [--out FILE.bmp] [--quiet]\n" );
+			"                [--set name=value]... [--set-string name=value]...\n                [--edit name=value]... [--size WxH] [--out FILE.bmp] [--quiet]\n" );
 }
 
 void put32( std::vector< uint8_t >& v, uint32_t x )
@@ -131,6 +131,7 @@ int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 				const std::string& identifier,
 				const std::vector< std::pair< std::string, std::vector< double > > >& overrides,
 				const std::vector< std::pair< std::string, std::vector< double > > >& edits,
+				const std::vector< std::pair< std::string, std::string > >& stringOverrides,
 				int width, int height,
 				const std::string& outPath )
 {
@@ -173,6 +174,17 @@ int renderTest( const std::vector< ofxbridge::PluginDesc >& plugins,
 		for( size_t i = 0; i < v.size(); ++i )
 			printf( "%s%g", i ? "," : "", v[ i ] );
 	};
+
+	// String parameters first: a plugin that loads a file off one of these
+	// generally needs it before anything numeric means very much, and a sheet
+	// or a font that has not been chosen makes every other setting look dead.
+	for( const auto& kv : stringOverrides )
+	{
+		if( effect->setParamString( kv.first, kv.second ) )
+			printf( "  set %s = \"%s\"\n", kv.first.c_str(), kv.second.c_str() );
+		else
+			fprintf( stderr, "  WARNING: no string parameter named '%s'\n", kv.first.c_str() );
+	}
 
 	// Setting parameters here proves the same path the FFGL wrapper uses:
 	// Effect::setParamValue -> the concrete param instance -> what render sees.
@@ -283,6 +295,7 @@ int main( int argc, char** argv )
 	std::string wantRenderFor;
 	std::vector< std::pair< std::string, std::vector< double > > > overrides;
 	std::vector< std::pair< std::string, std::vector< double > > > edits;
+	std::vector< std::pair< std::string, std::string > > stringOverrides;
 	int renderWidth  = 64;
 	int renderHeight = 32;
 	std::string outPath;
@@ -310,6 +323,17 @@ int main( int argc, char** argv )
 				return 2;
 			}
 			overrides.emplace_back( kv.substr( 0, eq ), parseValues( kv.c_str() + eq + 1 ) );
+		}
+		else if( a == "--set-string" && i + 1 < argc )
+		{
+			const std::string kv = argv[ ++i ];
+			const size_t eq      = kv.find( '=' );
+			if( eq == std::string::npos )
+			{
+				fprintf( stderr, "--set-string expects name=value, got '%s'\n", kv.c_str() );
+				return 2;
+			}
+			stringOverrides.emplace_back( kv.substr( 0, eq ), kv.substr( eq + 1 ) );
 		}
 		else if( a == "--edit" && i + 1 < argc )
 		{
@@ -358,7 +382,7 @@ int main( int argc, char** argv )
 		fputs( log.c_str(), stderr );
 
 	if( !wantRenderFor.empty() )
-		return renderTest( plugins, wantRenderFor, overrides, edits, renderWidth, renderHeight, outPath );
+		return renderTest( plugins, wantRenderFor, overrides, edits, stringOverrides, renderWidth, renderHeight, outPath );
 
 	if( !wantManifestFor.empty() )
 	{
