@@ -250,6 +250,10 @@ ranges survive intact.
   actually goes, and which GPU paths exist
 - [AGENTS.md](AGENTS.md) — onboarding, invariants and the traps found along the way
 
+<!-- attributions:start -->
+This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+<!-- attributions:end -->
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
