@@ -36,7 +36,7 @@ a real Resolume folder to film it.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-macos-universal.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-macos-universal.zip) | 5.8 MB |
+| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-macos-universal.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-macos-universal.zip) | 5.9 MB |
 
 </details>
 
