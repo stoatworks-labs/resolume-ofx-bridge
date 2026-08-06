@@ -42,6 +42,8 @@ a real Resolume folder to film it.*
 
 All builds, checksums and release notes: [github.com/stoatworks-labs/resolume-ofx-bridge/releases](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases).
 
+macOS builds are signed and notarised by Apple, so they open normally — no Gatekeeper warning and no quarantine step.
+
 <!-- downloads:end -->
 
 ## Or wrap a plugin in your browser
