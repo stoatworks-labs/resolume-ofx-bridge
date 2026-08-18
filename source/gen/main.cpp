@@ -28,13 +28,75 @@
 #include <string>
 #include <vector>
 
-#if !defined( _WIN32 )
+#if defined( _WIN32 )
+#include <windows.h>
+#else
 #include <dlfcn.h>
 #endif
 
 namespace fs = std::filesystem;
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// Loading a bundle the way a host would
+//
+// FFGL hosts resolve plugMain by symbol name out of a dynamically loaded
+// object, so verify has to do the same or it is not testing what ships. The two
+// platforms spell that differently and nothing else about the check changes, so
+// the difference is confined to here.
+// ---------------------------------------------------------------------------
+#if defined( _WIN32 )
+using ModuleHandle = HMODULE;
+
+ModuleHandle loadModule( const std::string& path )
+{
+	return LoadLibraryA( path.c_str() );
+}
+
+void* findSymbol( ModuleHandle handle, const char* name )
+{
+	return (void*)GetProcAddress( handle, name );
+}
+
+/// LoadLibrary/GetProcAddress report through GetLastError rather than a string,
+/// and FormatMessage is the only way to get the text a person can act on -- "the
+/// specified module could not be found" usually means a missing dependent DLL,
+/// not a missing plugin, and those two send you looking in different places.
+std::string moduleError()
+{
+	const DWORD code = GetLastError();
+	char* text       = nullptr;
+	const DWORD n    = FormatMessageA( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+										   FORMAT_MESSAGE_IGNORE_INSERTS,
+									   nullptr, code, 0, (char*)&text, 0, nullptr );
+	std::string out = n > 0 && text != nullptr ? std::string( text, n ) : std::string();
+	if( text != nullptr )
+		LocalFree( text );
+	while( !out.empty() && ( out.back() == '\n' || out.back() == '\r' ) )
+		out.pop_back();
+	return out.empty() ? ( "error " + std::to_string( (unsigned long)code ) )
+					   : out + " (" + std::to_string( (unsigned long)code ) + ")";
+}
+#else
+using ModuleHandle = void*;
+
+ModuleHandle loadModule( const std::string& path )
+{
+	return dlopen( path.c_str(), RTLD_NOW | RTLD_LOCAL );
+}
+
+void* findSymbol( ModuleHandle handle, const char* name )
+{
+	return dlsym( handle, name );
+}
+
+std::string moduleError()
+{
+	const char* e = dlerror();
+	return e != nullptr ? std::string( e ) : std::string( "unknown error" );
+}
+#endif
 
 // FFGL wire protocol, duplicated here so the generator does not have to link the
 // FFGL SDK just to interrogate a bundle.
@@ -144,15 +206,12 @@ void usage()
 
 int doVerify( const std::string& bundlePath )
 {
-#if defined( _WIN32 )
-	fprintf( stderr, "verify is not implemented on Windows yet\n" );
-	(void)bundlePath;
-	return 1;
-#else
 	fs::path binary = bundlePath;
 	std::error_code ec;
 
-	// Inside a macOS bundle the loadable object is Contents/MacOS/<name>.
+	// Inside a macOS bundle the loadable object is Contents/MacOS/<name>. On
+	// Windows and Linux an FFGL plugin is a bare .dll/.so, so the path given is
+	// already the thing to load.
 	if( fs::is_directory( binary, ec ) )
 	{
 		const fs::path macos = binary / "Contents" / "MacOS";
@@ -175,18 +234,17 @@ int doVerify( const std::string& bundlePath )
 		}
 	}
 
-	void* handle = dlopen( binary.c_str(), RTLD_NOW | RTLD_LOCAL );
+	ModuleHandle handle = loadModule( binary.string() );
 	if( handle == nullptr )
 	{
-		fprintf( stderr, "dlopen failed: %s\n", dlerror() );
+		fprintf( stderr, "loading %s failed: %s\n", binary.string().c_str(), moduleError().c_str() );
 		return 1;
 	}
 
-	auto plugMain = (PlugMainFn)dlsym( handle, "plugMain" );
+	auto plugMain = (PlugMainFn)findSymbol( handle, "plugMain" );
 	if( plugMain == nullptr )
 	{
-		fprintf( stderr, "plugMain not found: %s\n", dlerror() );
-		dlclose( handle );
+		fprintf( stderr, "plugMain not found: %s\n", moduleError().c_str() );
 		return 1;
 	}
 
@@ -197,7 +255,6 @@ int doVerify( const std::string& bundlePath )
 	if( info.PointerValue == nullptr )
 	{
 		fprintf( stderr, "plugin returned no info\n" );
-		dlclose( handle );
 		return 1;
 	}
 	const PluginInfoStruct* pi = (const PluginInfoStruct*)info.PointerValue;
@@ -263,11 +320,11 @@ int doVerify( const std::string& bundlePath )
 		}
 	}
 
-	// Deliberately not dlclose()d: the wrapper and this tool both link the OFX
+	// Deliberately never unloaded: the wrapper and this tool both link the OFX
 	// host, so unloading the bundle would tear down one copy of its statics while
-	// ours is still live. Nothing here outlives the process anyway.
+	// ours is still live. Nothing here outlives the process anyway -- which is
+	// also why the failure paths above simply return.
 	return 0;
-#endif
 }
 
 } // namespace

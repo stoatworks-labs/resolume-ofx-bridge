@@ -15,24 +15,32 @@
  * The wrapped plugin runs on THEIR machine, so this has to match the host they
  * will load it in — not the machine that built the page. `platform` is the
  * modern replacement for the userAgent sniffing this would otherwise need.
+ *
+ * `arch` is the subdirectory of Contents/ the binary must sit in, and it is not
+ * cosmetic: an OFX host looks in exactly one of these and nowhere else. Only
+ * macOS hosts fall back to Contents/MacOS, so a Windows or Linux bundle laid
+ * out the macOS way is not "probably fine" — it is invisible.
  */
 const SHELLS = {
   macos: {
     url: './shells/ffglofxshell-macos-universal.ofx',
     label: 'macOS (Apple Silicon + Intel)',
     ext: '.ofx.bundle',
+    arch: 'MacOS',
     tested: true,
   },
   windows: {
     url: './shells/ffglofxshell-windows-x86_64.ofx',
     label: 'Windows x64',
     ext: '.ofx.bundle',
+    arch: 'Win64',
     tested: false,
   },
   linux: {
     url: './shells/ffglofxshell-linux-x86_64.ofx',
     label: 'Linux x64',
     ext: '.ofx.bundle',
+    arch: 'Linux-x86-64',
     tested: false,
     noAe: true,
   },
@@ -171,7 +179,7 @@ el('pickOut').addEventListener('click', async () => {
  * against the origin-private filesystem, which is the same interface the
  * picker returns.
  */
-export async function assembleBundle(guest, name, kind, outDir, onLog = () => {}) {
+export async function assembleBundle(guest, name, kind, outDir, onLog = () => {}, arch = SHELL.arch) {
   const stem = name.replace(/\.(ofx\.bundle|bundle|plugin)$/i, '');
   const safe = stem.replace(/[^A-Za-z0-9]+/g, '_');
   const suffix = kind === 'ae' ? '_AE' : '_FFGL';
@@ -185,10 +193,13 @@ export async function assembleBundle(guest, name, kind, outDir, onLog = () => {}
 
   const bundle = await outDir.getDirectoryHandle(bundleName, { create: true });
   const contents = await bundle.getDirectoryHandle('Contents', { create: true });
-  const macos = await contents.getDirectoryHandle('MacOS', { create: true });
+  // Named for the shell's platform, not for the one that wrote the page. See
+  // SHELLS above for why getting this wrong makes the bundle invisible rather
+  // than broken.
+  const archDir = await contents.getDirectoryHandle(arch, { create: true });
   const guestDir = await contents.getDirectoryHandle('Guest', { create: true });
 
-  await writeFile(macos, binaryName, shell);
+  await writeFile(archDir, binaryName, shell);
   onLog(`Shell written (${(shell.byteLength / 1048576).toFixed(1)} MB)`, 'ok');
 
   let bytes = 0;

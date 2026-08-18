@@ -19,6 +19,12 @@
 // software renderer is present, letting CI skip GPU paths honestly instead of
 // running them and reporting a meaningless pass.
 //
+// Exit 3 also covers being unable to create a context at all -- a hosted
+// Windows runner has no OpenGL 4.1 core driver, and a Windows service session
+// has no desktop for WGL to put a window on. Both mean "this machine cannot
+// host the test", which is a different fact from "the render path is broken",
+// and the status says which.
+//
 // --demo runs a larger colour test pattern through the effect and writes a
 // side-by-side before/after image, so the documentation shows real plugin
 // output rather than a mock-up.
@@ -29,14 +35,23 @@
 
 #include "ffgl/FFGL.h"
 
-#include <OpenGL/OpenGL.h>
-#include <OpenGL/gl3.h>
+// The offscreen context and the module loader are the same two things the FFGL
+// guest needs, and it already has them for all three platforms. Sharing that
+// module is what makes this harness buildable off macOS at all -- and means
+// there is one WGL context creation in the repo to get right, not two.
+#include "ffglguest/Platform.h"
+
+#if defined( __APPLE__ )
+	#include <OpenGL/OpenGL.h>
+	#include <OpenGL/gl3.h>
+#else
+	#include <GL/glew.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
 #include <cstring>
-#include <dlfcn.h>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -52,55 +67,11 @@ using PlugMainFn = FFMixed ( * )( FFUInt32, FFMixed, FFInstanceID );
 int gWidth  = 64;
 int gHeight = 32;
 
-/// Create a context.
-///
-/// 4.1 core is what Resolume uses on macOS, so that is the default. The legacy
-/// 2.1 profile exists only for testing OFX OpenGL-render plugins that draw with
-/// immediate mode (glBegin/glVertex), which is illegal in a core profile — see
-/// docs/04-gpu-acceleration.md. macOS offers no compatibility profile above 2.1,
-/// so this really is either/or.
-CGLContextObj createContext( bool legacy )
-{
-	CGLPixelFormatAttribute attrs[] = {
-		kCGLPFAOpenGLProfile,
-		(CGLPixelFormatAttribute)( legacy ? kCGLOGLPVersion_Legacy : kCGLOGLPVersion_GL4_Core ),
-		kCGLPFAColorSize, (CGLPixelFormatAttribute)24,
-		kCGLPFAAlphaSize, (CGLPixelFormatAttribute)8,
-		(CGLPixelFormatAttribute)0
-	};
-
-	CGLPixelFormatObj pix = nullptr;
-	GLint npix            = 0;
-	if( CGLChoosePixelFormat( attrs, &pix, &npix ) != kCGLNoError || pix == nullptr )
-	{
-		fprintf( stderr, "no suitable GL pixel format\n" );
-		return nullptr;
-	}
-
-	CGLContextObj ctx = nullptr;
-	const CGLError err = CGLCreateContext( pix, nullptr, &ctx );
-	CGLDestroyPixelFormat( pix );
-	if( err != kCGLNoError || ctx == nullptr )
-	{
-		fprintf( stderr, "CGLCreateContext failed (%d)\n", err );
-		return nullptr;
-	}
-
-	CGLSetCurrentContext( ctx );
-	return ctx;
-}
-
 std::string findBinary( const std::string& bundlePath )
 {
-	std::error_code ec;
-	fs::path p = bundlePath;
-	if( !fs::is_directory( p, ec ) )
-		return p.string();
-
-	const fs::path macos = p / "Contents" / "MacOS";
-	for( const auto& e : fs::directory_iterator( macos, ec ) )
-		return e.path().string();
-	return std::string();
+	// A macOS bundle carries the binary inside; everywhere else an FFGL plugin
+	// is the plain .dll/.so this was handed.
+	return ffglguest::platform::binaryInside( bundlePath );
 }
 
 void fillRamp( std::vector< uint8_t >& px )
@@ -231,6 +202,13 @@ bool writeComparisonBmp( const std::string& path,
 
 int main( int argc, char** argv )
 {
+	// Unbuffered, because everything this prints is a diagnostic and the run it
+	// most needs to explain is the one that ends in a crash -- where a buffered
+	// stdout redirected to a CI log arrives empty, and the last thing the
+	// harness reported becomes "nothing at all".
+	setvbuf( stdout, nullptr, _IONBF, 0 );
+	setvbuf( stderr, nullptr, _IONBF, 0 );
+
 	if( argc < 2 )
 	{
 		fprintf( stderr, "usage: ffgltest <bundle> [paramIndex=value]...\n" );
@@ -285,9 +263,28 @@ int main( int argc, char** argv )
 		return 1;
 	}
 
-	CGLContextObj ctx = createContext( legacyGL );
-	if( ctx == nullptr )
-		return 1;
+	// 4.1 core is what Resolume uses, so that is the default. The legacy profile
+	// exists only for testing OFX OpenGL-render plugins that draw with immediate
+	// mode (glBegin/glVertex), which is illegal in a core profile -- see
+	// docs/04-gpu-acceleration.md.
+	// Announced before the attempt, not after: creating a context runs driver
+	// code that can take the process down rather than return, and when that
+	// happens the last line printed is the only evidence of how far it got.
+	printf( "creating an offscreen %s GL context\n", legacyGL ? "legacy" : "4.1 core" );
+
+	ffglguest::platform::GlContext ctx;
+	std::string ctxError;
+	if( !ctx.create( ctxError, legacyGL ) )
+	{
+		// 3, the same status --require-gpu uses, and for the same reason: this
+		// machine cannot host the test, which is not the same fact as the code
+		// being wrong. A hosted Windows runner has no OpenGL 4.1 core driver
+		// and a service session has no desktop to put a window on; both would
+		// otherwise read as a failing render path.
+		fprintf( stderr, "skipping: %s\n", ctxError.c_str() );
+		return 3;
+	}
+	ctx.makeCurrent();
 
 	const char* renderer = (const char*)glGetString( GL_RENDERER );
 	printf( "GL renderer: %s\n", renderer );
@@ -302,13 +299,14 @@ int main( int argc, char** argv )
 		return 3;
 	}
 
-	void* handle = dlopen( binary.c_str(), RTLD_NOW | RTLD_LOCAL );
-	if( handle == nullptr )
+	ffglguest::platform::Module module;
+	std::string loadError;
+	if( !module.load( binary, loadError ) )
 	{
-		fprintf( stderr, "dlopen failed: %s\n", dlerror() );
+		fprintf( stderr, "loading %s failed: %s\n", binary.c_str(), loadError.c_str() );
 		return 1;
 	}
-	auto plugMain = (PlugMainFn)dlsym( handle, "plugMain" );
+	auto plugMain = (PlugMainFn)module.symbol( "plugMain" );
 	if( plugMain == nullptr )
 	{
 		fprintf( stderr, "plugMain not found\n" );
@@ -480,7 +478,6 @@ int main( int argc, char** argv )
 	}
 
 	plugMain( FF_DEINSTANTIATE_GL, zero, instance );
-	CGLSetCurrentContext( nullptr );
-	CGLDestroyContext( ctx );
+	ctx.destroy();
 	return 0;
 }

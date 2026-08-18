@@ -40,9 +40,12 @@ target_include_directories( ofxhostsupport PUBLIC
 find_package( EXPAT REQUIRED )
 target_link_libraries( ofxhostsupport PUBLIC EXPAT::EXPAT )
 
-if( APPLE )
-	target_compile_definitions( ofxhostsupport PUBLIC OFX_SUPPORTS_MULTITHREAD )
-endif()
+# Enables HostSupport's OFX multi-thread suite, which our Host implements over
+# std::thread and std::recursive_mutex -- nothing platform-specific, so this is
+# not conditional. It used to be inside an if(APPLE) purely because macOS was
+# the only platform anyone had compiled; MSVC found that out immediately, since
+# without the define the suite's methods exist to override nothing.
+target_compile_definitions( ofxhostsupport PUBLIC OFX_SUPPORTS_MULTITHREAD )
 
 # Enables HostSupport's OFX OpenGL render path: the kOfxOpenGLRenderSuite, the
 # Texture class, and the contextAttached/Detached actions. A plugin that
@@ -68,6 +71,12 @@ target_link_libraries( ofxbridge PUBLIC ofxhostsupport )
 
 if( APPLE )
 	target_link_libraries( ofxbridge PUBLIC "-framework CoreFoundation" )
+
+	# Which GPU render paths the host may advertise. These say "the interop for
+	# this exists in this build", so they belong wherever the bridges are
+	# compiled -- see the ofxwrapper block below and Host.cpp's capability
+	# properties. PUBLIC because ofxprobe reports what the host claims.
+	target_compile_definitions( ofxbridge PUBLIC OFXBRIDGE_HAS_METAL OFXBRIDGE_HAS_OPENCL )
 endif()
 
 # ---------------------------------------------------------------------------
@@ -110,6 +119,11 @@ if( APPLE )
 	# OpenCL is deprecated on macOS but still functional, and this is the only
 	# platform where the OpenCL path can currently be tested.
 	target_compile_definitions( ofxwrapper PRIVATE CL_SILENCE_DEPRECATION GL_SILENCE_DEPRECATION )
+else()
+	# Neither interop is wired up off macOS. Both bridges still exist as objects
+	# the wrapper calls; they decline in init() and the frame takes the CPU or
+	# GL route. See source/ffgl/GpuBridgeUnavailable.cpp.
+	target_sources( ofxwrapper PRIVATE source/ffgl/GpuBridgeUnavailable.cpp )
 endif()
 target_include_directories( ofxwrapper PRIVATE source/ffgl )
 target_link_libraries( ofxwrapper PRIVATE ffgl::sdk ofxbridge )
@@ -117,6 +131,8 @@ target_link_libraries( ofxwrapper PRIVATE ffgl::sdk ofxbridge )
 if( NOT APPLE )
 	find_package( GLEW REQUIRED )
 	target_link_libraries( ofxwrapper PRIVATE GLEW::GLEW )
+	find_package( OpenGL REQUIRED )
+	target_link_libraries( ofxwrapper PRIVATE OpenGL::GL )
 endif()
 
 if( APPLE )
@@ -140,7 +156,9 @@ endif()
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # ffglguest - host an FFGL plugin as a guest (the FFGL->OFX cell of the
-# any-to-any matrix). macOS only: the offscreen context is CGL.
+# any-to-any matrix). Its Platform module owns the two OS dependencies -- module
+# loading and an offscreen GL context -- for all three platforms, which is why
+# ffgltest links it rather than making a context of its own.
 # ---------------------------------------------------------------------------
 if( APPLE )
 	add_library( ffglguest STATIC
@@ -210,14 +228,44 @@ if( APPLE OR WIN32 )
 			COMMENT "cargo: aeguest (universal)"
 			VERBATIM
 		)
+	elseif( WIN32 )
+		# One slice, but named explicitly rather than left to cargo's host
+		# default. MSVC cross-compiles happily -- an ARM64 Windows machine
+		# building -A x64 is the normal way to produce x64 binaries here -- and
+		# cargo would answer that with a host-arch .lib. The link error names
+		# only the symbols, so the arch mismatch is the last thing you suspect.
+		#
+		# `rustup target add` because a CI runner ships one target; harmless
+		# when it is already installed, and the Apple branch does the same.
+		if( CMAKE_GENERATOR_PLATFORM )
+			set( AEGUEST_ARCH "${CMAKE_GENERATOR_PLATFORM}" )
+		else()
+			set( AEGUEST_ARCH "${CMAKE_SYSTEM_PROCESSOR}" )
+		endif()
+		string( TOLOWER "${AEGUEST_ARCH}" AEGUEST_ARCH )
+
+		if( AEGUEST_ARCH STREQUAL "arm64" OR AEGUEST_ARCH STREQUAL "aarch64" )
+			set( AEGUEST_RUST_TARGET "aarch64-pc-windows-msvc" )
+		elseif( AEGUEST_ARCH STREQUAL "win32" OR AEGUEST_ARCH STREQUAL "x86" )
+			set( AEGUEST_RUST_TARGET "i686-pc-windows-msvc" )
+		else()
+			set( AEGUEST_RUST_TARGET "x86_64-pc-windows-msvc" )
+		endif()
+
+		set( AEGUEST_A "${AEGUEST_TARGET_DIR}/${AEGUEST_RUST_TARGET}/release/aeguest.lib" )
+		add_custom_command(
+			OUTPUT "${AEGUEST_A}"
+			COMMAND rustup target add ${AEGUEST_RUST_TARGET}
+			COMMAND cargo build --release --target ${AEGUEST_RUST_TARGET} --target-dir "${AEGUEST_TARGET_DIR}"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/aeguest"
+			DEPENDS aeguest/src/lib.rs aeguest/Cargo.toml
+			COMMENT "cargo: aeguest (${AEGUEST_RUST_TARGET})"
+			VERBATIM
+		)
 	else()
 		# One native slice, and no lipo — which does not exist off macOS and
 		# whose absence surfaces only as a bare "Error 127".
-		if( WIN32 )
-			set( AEGUEST_A "${AEGUEST_TARGET_DIR}/release/aeguest.lib" )
-		else()
-			set( AEGUEST_A "${AEGUEST_TARGET_DIR}/release/libaeguest.a" )
-		endif()
+		set( AEGUEST_A "${AEGUEST_TARGET_DIR}/release/libaeguest.a" )
 		add_custom_command(
 			OUTPUT "${AEGUEST_A}"
 			COMMAND cargo build --release --target-dir "${AEGUEST_TARGET_DIR}"
@@ -352,11 +400,15 @@ endif()
 # ---------------------------------------------------------------------------
 # ffgltest - drive a generated bundle through a real GL context
 #
-# The only way to exercise ProcessOpenGL without Resolume. macOS-only for now:
-# it creates the context with CGL directly.
+# The only way to exercise ProcessOpenGL without Resolume, and therefore the
+# only evidence that the per-frame path a host actually drives works at all. It
+# gets its context and its module loader from ffglguest, which has both for
+# every platform, so this builds wherever the wrapper does.
 # ---------------------------------------------------------------------------
+add_executable( ffgltest source/gltest/main.cpp )
+target_link_libraries( ffgltest PRIVATE ffgl::sdk ffglguest )
+target_include_directories( ffgltest PRIVATE source )
+add_dependencies( ffgltest ofxwrapper )
 if( APPLE )
-	add_executable( ffgltest source/gltest/main.cpp )
-	target_link_libraries( ffgltest PRIVATE ffgl::sdk "-framework OpenGL" )
-	add_dependencies( ffgltest ofxwrapper )
+	target_link_libraries( ffgltest PRIVATE "-framework OpenGL" )
 endif()

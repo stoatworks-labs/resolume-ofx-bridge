@@ -43,7 +43,13 @@ struct GlContext
 	void* handle = nullptr;//!< CGLContextObj / HGLRC / EGLContext
 	void* extra  = nullptr;//!< HWND+HDC pair on Windows, EGLDisplay on Linux
 
-	bool create( std::string& error );
+	/// `legacy` asks for a compatibility/immediate-mode context instead of the
+	/// 4.1 core profile. Nothing in the guest path wants it -- Resolume is core
+	/// profile and FFGL 2.x shaders say `#version 410 core` -- but ffgltest
+	/// offers it for testing immediate-mode OFX plugins, which is the one case
+	/// where being unable to make such a context is the answer rather than an
+	/// error. Everything else should take the default.
+	bool create( std::string& error, bool legacy = false );
 	void makeCurrent();
 	void clearCurrent();
 	void destroy();

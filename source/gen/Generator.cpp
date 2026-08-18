@@ -75,6 +75,33 @@ std::string sanitise( const std::string& in )
 	return out;
 }
 
+/// The subdirectory of an OFX bundle's Contents/ that holds a binary for this
+/// platform.
+///
+/// A host looks in exactly one of these and nowhere else. Only a macOS host
+/// falls back to Contents/MacOS when the arch-specific directory is missing
+/// (ofxhPluginCache.cpp guards that fallback with __APPLE__), so writing every
+/// bundle the macOS way -- which this generator used to do -- produces Windows
+/// and Linux bundles no host can see. They are not broken on load; they are
+/// never loaded.
+///
+/// "MacOS" rather than "MacOS-x86-64" because we ship universal binaries, which
+/// is the case the spec reserves the unsuffixed name for. Win64 is the spec's
+/// spelling; HostSupport happens to write it lowercase, and Windows does not
+/// care, but other hosts read the spec.
+const char* ofxArchDir()
+{
+#if defined( __APPLE__ )
+	return "MacOS";
+#elif defined( _WIN32 )
+	return "Win64";
+#elif defined( __linux__ )
+	return sizeof( void* ) == 4 ? "Linux-x86" : "Linux-x86-64";
+#else
+	#error "no OFX arch directory name for this platform"
+#endif
+}
+
 std::string findTemplate( const std::string& executablePath )
 {
 	std::error_code ec;
@@ -431,11 +458,11 @@ Result wrapFfgl( const WrapFfglOptions& options, const LogFn& log )
 		// Tinsel can share /Library/OFX/Plugins without colliding.
 		const fs::path out = fs::path( options.outDir ) / ( safe + "_FFGL.ofx.bundle" );
 		fs::remove_all( out, ec );
-		fs::create_directories( out / "Contents" / "MacOS", ec );
+		fs::create_directories( out / "Contents" / ofxArchDir(), ec );
 		fs::create_directories( out / "Contents" / "Guest", ec );
 
 		const std::string binaryName = safe + "_FFGL.ofx";
-		fs::copy_file( options.shellPath, out / "Contents" / "MacOS" / binaryName,
+		fs::copy_file( options.shellPath, out / "Contents" / ofxArchDir() / binaryName,
 					   fs::copy_options::overwrite_existing, ec );
 		if( ec )
 		{
@@ -520,10 +547,13 @@ std::string piplName( const fs::path& bundle )
 		const size_t at = data.find( "8BIMname" );
 		if( at == std::string::npos || at + 8 + 8 + 1 >= data.size() )
 			continue;
-		const size_t pascal = at + 8 + 8;
-		const size_t len    = (unsigned char)data[ pascal ];
-		if( pascal + 1 + len <= data.size() )
-			return data.substr( pascal + 1, len );
+		// Not named `pascal`: that is still a calling-convention keyword in
+		// MSVC, so the declaration parses as a function and the error lands two
+		// lines later talking about __cdecl.
+		const size_t pascalAt = at + 8 + 8;
+		const size_t len      = (unsigned char)data[ pascalAt ];
+		if( pascalAt + 1 + len <= data.size() )
+			return data.substr( pascalAt + 1, len );
 	}
 	return {};
 }
@@ -633,11 +663,11 @@ Result wrapAe( const WrapFfglOptions& options, const LogFn& log )
 
 		const fs::path out = fs::path( options.outDir ) / ( safe + "_AE.ofx.bundle" );
 		fs::remove_all( out, ec );
-		fs::create_directories( out / "Contents" / "MacOS", ec );
+		fs::create_directories( out / "Contents" / ofxArchDir(), ec );
 		fs::create_directories( out / "Contents" / "Guest", ec );
 
 		const std::string binaryName = safe + "_AE.ofx";
-		fs::copy_file( options.shellPath, out / "Contents" / "MacOS" / binaryName,
+		fs::copy_file( options.shellPath, out / "Contents" / ofxArchDir() / binaryName,
 					   fs::copy_options::overwrite_existing, ec );
 
 		const fs::path guestSrc = fs::path( bundlePath );

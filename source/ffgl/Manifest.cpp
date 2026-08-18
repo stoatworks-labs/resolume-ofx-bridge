@@ -69,14 +69,21 @@ void chooseRange( const ManifestParam& p, int component, float& outMin, float& o
 }
 
 /// Component suffixes, so a flattened vector param still reads sensibly.
+///
+/// Static tables rather than the compound literals this used to index: those
+/// are a GNU extension clang takes and MSVC does not, and their lifetime rules
+/// are murky enough that returning a pointer into one was never really sound.
 const char* suffixFor( const std::string& type, int component )
 {
+	static const char* const rgba[] = { " R", " G", " B", " A" };
+	static const char* const xyz[]  = { " X", " Y", " Z" };
+
 	if( type == kRGB || type == kRGBA )
-		return ( const char*[] ){ " R", " G", " B", " A" }[ component ];
+		return component >= 0 && component < 4 ? rgba[ component ] : "";
 	if( type == kDouble2D || type == kInteger2D )
-		return ( const char*[] ){ " X", " Y" }[ component ];
+		return component >= 0 && component < 2 ? xyz[ component ] : "";
 	if( type == kDouble3D || type == kInteger3D )
-		return ( const char*[] ){ " X", " Y", " Z" }[ component ];
+		return component >= 0 && component < 3 ? xyz[ component ] : "";
 	return "";
 }
 

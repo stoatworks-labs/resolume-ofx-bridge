@@ -859,12 +859,23 @@ Host::Host()
 
 	// Metal render. Many Resolve-targeted plugins are GPU-only, so without this
 	// they do not render slowly -- they refuse to render at all.
+	//
+	// Advertised only where the GL<->Metal interop is actually compiled. A build
+	// without it that claimed Metal anyway would be handed an id<MTLBuffer> it
+	// has no way to produce, which fails mid-render instead of declining up
+	// front -- the same reasoning as CUDA below.
+#ifdef OFXBRIDGE_HAS_METAL
 	_properties.setStringProperty( kOfxImageEffectPropMetalRenderSupported, "true" );
+#endif
 
 	// OpenCL buffer render. Matters on Windows and Linux, where Resolve uses it
 	// on AMD hardware; on macOS it is deprecated but still functional, which is
-	// what makes the path testable here at all.
+	// what makes the path testable here at all. Same gate, and the same reason:
+	// on the platforms where it matters most the interop is not written yet, so
+	// claiming it there would be the loudest possible lie.
+#ifdef OFXBRIDGE_HAS_OPENCL
 	_properties.setStringProperty( kOfxImageEffectPropOpenCLRenderSupported, "true" );
+#endif
 
 	// CUDA is deliberately NOT advertised. The render action exists but its
 	// GL interop has never been compiled or run, and claiming support we cannot

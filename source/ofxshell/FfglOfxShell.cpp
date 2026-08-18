@@ -102,12 +102,22 @@ struct Manifest
 
 std::string contentsDir()
 {
-	// Contents/MacOS/<binary> -> Contents/
+	// Contents/<ARCH>/<binary> -> Contents/
+	//
+	// The arch directory is not always "MacOS": an OFX bundle names it for the
+	// platform it holds a binary for, and the host looks in exactly that one --
+	// Win64, Linux-x86-64, MacOS. So this matches on the invariant that holds
+	// everywhere (the grandparent is Contents) rather than on the leaf name,
+	// which also spares it having to know that Windows spells the separator the
+	// other way round.
 	const std::string bin = ofxffgl::selfBinaryPath();
-	const size_t macos    = bin.rfind( "/MacOS/" );
-	if( macos == std::string::npos )
+	if( bin.empty() )
 		return {};
-	return bin.substr( 0, macos );
+
+	const std::filesystem::path contents = std::filesystem::path( bin ).parent_path().parent_path();
+	if( contents.filename() != "Contents" )
+		return {};
+	return contents.string();
 }
 
 /// Find the guest bundle inside Contents/Guest, without being told which it
@@ -126,15 +136,28 @@ std::string findGuestBundle( const std::string& contents )
 	return {};
 }
 
-/// "ffgl" or "ae", from the guest's own Info.plist rather than from a
-/// manifest: an After Effects plugin declares CFBundlePackageType eFKT, which
-/// is static data a generator can read without executing anything — and which
-/// this shell can equally read for itself.
+/// "ffgl" or "ae", from the guest itself rather than from a manifest.
+///
+/// On macOS an After Effects plugin is a bundle declaring CFBundlePackageType
+/// eFKT — static data a generator can read without executing anything, and
+/// which this shell can equally read for itself.
+///
+/// Windows has no such declaration: an AE plugin there is a DLL named .aex,
+/// with the PiPL in its resources. Reading resources means loading the module,
+/// which is exactly what this function exists to avoid doing before we know
+/// what we are loading, so the extension is the evidence available. It is also
+/// the same evidence After Effects itself uses to decide what to load.
 std::string sniffGuestType( const std::string& contents, const std::string& guestBundle )
 {
-	const std::filesystem::path plist =
-		std::filesystem::path( contents ) / guestBundle / "Contents" / "Info.plist";
-	std::ifstream f( plist );
+	const std::filesystem::path guest = std::filesystem::path( contents ) / guestBundle;
+
+	std::string ext = guest.extension().string();
+	for( char& c : ext )
+		c = (char)tolower( (unsigned char)c );
+	if( ext == ".aex" )
+		return "ae";
+
+	std::ifstream f( guest / "Contents" / "Info.plist" );
 	if( f )
 	{
 		const std::string text( ( std::istreambuf_iterator< char >( f ) ),
