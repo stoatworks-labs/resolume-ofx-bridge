@@ -2,14 +2,24 @@ name: release
 
 # Build the OFX bridge tools and the FFGL wrapper template.
 #
-# The tools are macOS only. The shells job below also builds the FFGL->OFX
-# shell for Windows and Linux — that is what the browser wrapper serves — and
-# those are labelled compiled-not-run wherever they appear, because there is no
-# Windows or Linux machine here to execute them on. Compiling is real evidence;
-# running is the evidence we do not have. See docs/03-verification.md.
+# macOS and Windows both build the full toolset and self-test it against a
+# corpus built from the OpenFX examples. Linux builds only the FFGL->OFX shell,
+# because FFGL is Resolume's format and there is no Linux Resolume for the other
+# direction to target.
+#
+# What the self-tests cover differs by platform, and the difference is the
+# honest part: the GL render path is asserted on macOS and only built on
+# Windows, because a hosted Windows runner has no OpenGL 4.1 core driver. See
+# docs/03-verification.md.
 #
 # macos-14 is arm64 and cross-compiles the x86_64 slice; the Intel macOS runners
 # are retired, so never target macos-13.
+#
+# The vcpkg triplet is x64-windows-static-md everywhere, and that is not a
+# preference. The default dynamic triplet leaves the artefacts importing
+# glew32.dll, which is not on a normal machine and is not in the zip -- measured,
+# not assumed. Static libraries with the dynamic CRT is the combination that
+# loads on a machine that has only the VC++ redistributable.
 on:
   workflow_dispatch:
   push:
@@ -20,13 +30,15 @@ permissions:
   contents: write
 
 jobs:
+  # Linux only. The Windows shell is built by the windows job below, which
+  # needs the whole toolset anyway and uploads the shell under the same artifact
+  # name the browser wrapper expects.
   shells:
     name: shell-${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: windows-x86_64, os: windows-latest }
           - { name: linux-x86_64,   os: ubuntu-latest }
     runs-on: ${{ matrix.os }}
     steps:
@@ -42,7 +54,7 @@ jobs:
 
       - name: Dependencies (Windows)
         if: runner.os == 'Windows'
-        run: vcpkg install glew:x64-windows expat:x64-windows
+        run: vcpkg install glew:x64-windows-static-md expat:x64-windows-static-md
 
       - name: Configure (Linux)
         if: runner.os == 'Linux'
@@ -52,7 +64,7 @@ jobs:
         if: runner.os == 'Windows'
         run: >
           cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
-          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
 
       - name: Build the shell
@@ -73,6 +85,141 @@ jobs:
           name: shell-${{ matrix.name }}
           path: shellout/*
           if-no-files-found: error
+
+  windows:
+    name: windows-x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Dependencies
+        run: vcpkg install glew:x64-windows-static-md expat:x64-windows-static-md
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Verify nothing needs a DLL we do not ship
+        # The default vcpkg triplet produces artefacts importing glew32.dll, which
+        # is in nobody's System32 and not in this zip. That failure appears on a
+        # user's machine as "the specified module could not be found", long after
+        # a green build, so it is checked here rather than trusted.
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $install = & $vswhere -latest -products * -property installationPath
+          $vc = Get-ChildItem (Join-Path $install 'VC\Tools\MSVC\*\bin\Host*\x64\dumpbin.exe') |
+                Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $vc) { Write-Output '::error::dumpbin not found'; exit 1 }
+          $bad = $false
+          foreach ($f in @('build\ffglofxshell.ofx', 'build\Release\ofxwrapper.dll',
+                           'build\Release\ofxgen.exe', 'build\Release\ofxprobe.exe')) {
+            $deps = & $vc /dependents $f | Select-String -Pattern 'glew|expat|zlib'
+            if ($deps) {
+              Write-Output "::error::$f imports a library that is not shipped: $deps"
+              $bad = $true
+            }
+          }
+          if ($bad) { exit 1 }
+          Write-Output 'no unshipped imports'
+
+      - name: Self-test against real OFX plugins
+        # The Windows half of the macOS self-test, minus the parts a hosted
+        # runner cannot host. A release must not ship a binary that fails its
+        # own harness on the platform it is built for.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $bin = 'build\Release'
+
+          powershell -ExecutionPolicy Bypass -File scripts\build-test-plugins.ps1
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::test corpus failed to build'; exit 1 }
+
+          & $bin\ofxprobe.exe --dir build\test-plugins
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::ofxprobe could not describe the corpus'; exit 1 }
+
+          & $bin\ofxprobe.exe --dir build\test-plugins --render uk.co.thefoundry.OfxInvertExample
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::CPU render failed'; exit 1 }
+
+          & $bin\ofxgen.exe generate --dir build\test-plugins --out build\generated
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::generate failed'; exit 1 }
+
+          # LoadLibrary the generated plugin and read its parameter table, which
+          # is what a host does before it shows a single control.
+          & $bin\ofxgen.exe verify build\generated\OFX_Gain_Example.dll
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::the generated plugin did not load'; exit 1 }
+
+          # Back the other way, and then find it with our own OFX host. This is
+          # the step that catches a bundle written with the wrong Contents\<arch>
+          # directory: such a bundle is not broken, it is invisible, so only a
+          # scan proves the layout is right.
+          & $bin\ofxgen.exe wrap-ffgl --bundle build\generated\OFX_Invert_Example.dll --out build\wrapped
+          if ($LASTEXITCODE -ne 0) { Write-Output '::error::wrap-ffgl failed'; exit 1 }
+          if (-not (Test-Path 'build\wrapped\OFX_Invert_Examp_FFGL.ofx.bundle\Contents\Win64')) {
+            Write-Output '::error::the wrapped bundle has no Contents\Win64 directory'
+            exit 1
+          }
+          $found = & $bin\ofxprobe.exe --dir build\wrapped | Select-String -Pattern 'com.stoatworks.ffglwrap'
+          if (-not $found) { Write-Output '::error::the wrapped bundle was not discovered by the host'; exit 1 }
+
+          # The GL path is built here and exercised nowhere: a hosted runner has
+          # no OpenGL 4.1 core driver, so ffgltest exits 3 and says why. Any
+          # other non-zero status is a real failure.
+          & $bin\ffgltest.exe build\generated\OFX_Invert_Example.dll --expect-centre 127,127,127,0
+          if ($LASTEXITCODE -eq 3) {
+            Write-Output '::notice::skipped the GL self-test: no OpenGL 4.1 core context on this runner'
+          } elseif ($LASTEXITCODE -ne 0) {
+            Write-Output '::error::the GL render path failed'
+            exit 1
+          }
+          Write-Output 'self-test complete'
+
+      - name: Stage the release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/resolume-ofx-bridge
+          cp build/Release/ofxwrapper.dll dist/resolume-ofx-bridge/
+          cp build/Release/ofxgen.exe build/Release/ofxprobe.exe dist/resolume-ofx-bridge/
+          cp build/Release/ffgltest.exe dist/resolume-ofx-bridge/
+          # The FFGL->OFX shell, found by ofxgen wrap-ffgl next to itself.
+          cp build/ffglofxshell.ofx dist/resolume-ofx-bridge/
+          cp README.md CHANGELOG.md LICENSE dist/resolume-ofx-bridge/
+          cp -R docs dist/resolume-ofx-bridge/docs
+          cd dist && 7z a -tzip resolume-ofx-bridge-windows-x86_64.zip resolume-ofx-bridge
+
+      # Same artifact name and layout the browser wrapper's shells/ expects.
+      - name: Collect the shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shellout
+          cp build/ffglofxshell.ofx shellout/ffglofxshell-windows-x86_64.ofx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-windows-x86_64
+          path: shellout/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/resolume-ofx-bridge-windows-x86_64.zip
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/resolume-ofx-bridge-windows-x86_64.zip
+          fail_on_unmatched_files: true
 
   build:
     name: macos-universal
