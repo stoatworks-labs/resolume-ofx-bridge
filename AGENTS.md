@@ -90,14 +90,20 @@ hand-written OFX port on the probe's test frame.
   - `Host.{h,cpp}` — host, effect instance, clips, images, suites
   - `Params.{h,cpp}` — concrete param instances (HostSupport leaves these abstract)
   - `Catalog.{h,cpp}` — discovery, describe, manifest JSON
-- `source/ffgl/` — the generic FFGL wrapper (manifest, param mapping, GL bridge)
+- `source/ffgl/` — the generic FFGL wrapper (manifest, param mapping, GL bridge).
+  `MetalBridge`/`OpenCLBridge` are macOS; `GpuBridgeUnavailable.cpp` supplies
+  both as declining stubs elsewhere, so the render path has one shape on every
+  platform and the host advertises only what it can honour
+  (`OFXBRIDGE_HAS_METAL` / `_HAS_OPENCL`).
 - `source/gen/` — `Generator.{h,cpp}` is the scan-and-copy step with no argv and
   no UI; `main.cpp` is the `ofxgen` CLI around it, including the bundle verifier.
   Anything that changes what a generated bundle *contains* belongs in the former,
   or the app and the CLI drift apart.
 - `source/ui/` — `OFX Bridge.app`, a Cocoa window over `Generator`. AppKit only,
   built by the same CMake; it holds no generation logic of its own.
-- `source/gltest/` — `ffgltest`, offscreen-GL harness for `ProcessOpenGL`
+- `source/gltest/` — `ffgltest`, offscreen-GL harness for `ProcessOpenGL`. Gets
+  its context and module loader from `ffglguest/Platform`, so there is one WGL
+  context creation in the repo rather than two.
 - `source/probe/` — `ofxprobe` CLI
 - `external/openfx` — OFX headers + **HostSupport**, a BSD-3 host implementation
   maintained by the OFX project. Natron is built on it. Do not hand-roll suites.
@@ -206,6 +212,46 @@ bundle-scoped load path in HostSupport.
   same FFGL engine — so buttons for those two are offered with a caveat, not as
   a promise.
 
+### Windows traps
+
+Each of these compiled or ran cleanly on macOS and broke on Windows, and none of
+them announced what was actually wrong.
+
+- **An OFX bundle's binary must sit in `Contents/<ARCH>`** — `Win64`,
+  `Linux-x86-64`, `MacOS` — and only a macOS host falls back to `Contents/MacOS`
+  (`ofxhPluginCache.cpp` guards that with `__APPLE__`). A bundle laid out the
+  macOS way on Windows is not broken, it is **invisible**: the scan finds
+  nothing and says nothing. `Generator.cpp`'s `ofxArchDir()` is the one place
+  that decides this; the browser wrapper carries the same table in `SHELLS`.
+- **`pascal` is still a calling-convention keyword in MSVC.** A local named that
+  turns its declaration into a function, and the error arrives two lines later
+  complaining about `__cdecl`.
+- **`(const char*[]){ ... }[i]` is a GNU compound literal.** clang takes it,
+  MSVC does not, and its lifetime rules never made returning a pointer into one
+  sound anyway. Use a `static const` table.
+- **vcpkg's default triplet is dynamic.** Build with `x64-windows` and the
+  artefacts import `glew32.dll`, which is on no ordinary machine and in no
+  archive we ship — a green build that fails on a user's machine with "the
+  specified module could not be found". Use `x64-windows-static-md`: static
+  libraries, dynamic CRT. CI asserts it with `dumpbin /dependents`.
+- **Cargo builds for the host, MSVC builds for the target.** On an ARM64
+  Windows machine producing x64 binaries, an unqualified `cargo build` hands the
+  linker an arm64 `.lib` and the error names only missing symbols. The AE guest
+  passes `--target` derived from `CMAKE_GENERATOR_PLATFORM`.
+- **WGL needs a desktop.** In session 0 — a service, a scheduled task with no
+  logged-in user, a headless remote-exec agent — there is no window station, and
+  the Parallels ICD does not fail politely there, it takes the process down with
+  no output. `Platform.cpp` checks `WSF_VISIBLE` first so the failure has a
+  sentence attached to it.
+- **`OFX_SUPPORTS_MULTITHREAD` was inside an `if(APPLE)`** for no reason but
+  nobody having compiled elsewhere; our implementation is `std::thread` and
+  `std::recursive_mutex`. Without the define, the suite's overrides override
+  nothing and MSVC says so nine times.
+- **Redirected stdout is fully buffered.** A harness that crashes in driver code
+  loses everything it printed, so the run that most needs explaining produces an
+  empty log. `ffgltest` sets `_IONBF` and announces the context attempt *before*
+  making it.
+
 ### FFGL traps
 
 - **`FFInstanceID` is `void*`, not a 32-bit id.** Declaring `plugMain`'s third
@@ -271,7 +317,10 @@ Assumed / not yet done:
 - Premultiplication is asserted, not verified against Resolume's actual output.
 - GPU render paths (Metal/CUDA/OpenCL) are not implemented; CPU only, which means
   a full texture round trip per frame.
-- Windows and Linux are untried; `ofxgen verify` is macOS/Linux only.
+- **Windows is built and self-tested; its GL render path is not.** Everything
+  else there is run, in CI and on an ARM64 Windows guest targeting x64. See
+  docs/03-verification.md. Linux builds the FFGL->OFX shell only, and nothing
+  on it has been run.
 - CUDA is written but never compiled or run (no NVIDIA hardware).
 - No generator GUI yet.
 

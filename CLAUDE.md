@@ -10,12 +10,28 @@ git submodule update --init --recursive
 cmake -S . -B build && cmake --build build -j8
 ```
 
+Windows (x64, vcpkg for GLEW and expat — the static-md triplet, or the artefacts
+import a glew32.dll nobody has):
+
+```bash
+vcpkg install glew:x64-windows-static-md expat:x64-windows-static-md
+cmake -S . -B build -A x64 -DVCPKG_TARGET_TRIPLET=x64-windows-static-md -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
+cmake --build build --config Release --parallel
+```
+
+Everything but `OFX Bridge.app` builds there. Binaries land in `build\Release\`,
+except `ffglofxshell.ofx`, which is pinned to `build\`.
+
 ## Test corpus
 
 A clean machine has no OFX plugins, even with Resolve installed. Build some:
 
 ```bash
 ./scripts/build-test-plugins.sh          # -> build/test-plugins
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-test-plugins.ps1   # Windows; edit both
 ```
 
 ## The loop
@@ -45,12 +61,17 @@ open "build/OFX Bridge.app"                                       # the app
 ./build/ffgltest <bundle> --legacy-gl                   # immediate-mode GL plugins
 ./build/ffgltest <bundle> --expect-centre 64,64,64,127  # assert, exit 1 on mismatch
 ./build/ffgltest <bundle> --require-gpu                 # exit 3 if software renderer
+# exit 3 also means "no context could be created here" — a headless runner, or a
+# Windows session with no desktop. It is the skip status, not a failure.
 ```
 
 ## Release
 
-Tag-triggered; `.github/workflows/release.yml` builds macOS universal only
-(Windows/Linux paths exist but have never been compiled).
+Tag-triggered; `.github/workflows/release.yml` builds macOS universal and
+Windows x64, each self-tested against a corpus built from the OpenFX examples,
+plus the Linux FFGL->OFX shell. The GL render path is asserted on macOS only —
+no runner has a GL 4.1 core driver on Windows, where `ffgltest` exits 3 and CI
+skips with a notice.
 
 ```bash
 git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z   # latest released: v0.8.1

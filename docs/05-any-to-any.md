@@ -88,20 +88,33 @@ happen. Ask the repository's history how it knows.
 
 | | macOS | Windows | Linux |
 |---|---|---|---|
-| FFGL guest | CGL, **run and verified** | WGL, compiled only | surfaceless EGL, compiled only |
-| After Effects guest | yes | yes, compiled only | **no — Adobe has never shipped After Effects for Linux** |
-| Desktop tools (`ofxgen`, `ofxprobe`, the app) | yes | not built | not built |
+| OFX guest (`generate`, the founding direction) | **run and verified** | **run and verified**, except the GL render path | not built |
+| FFGL guest | CGL, **run and verified** | WGL, **wrapped and discovered**; guest render not run | surfaceless EGL, compiled only |
+| After Effects guest | yes | compiled only | **no — Adobe has never shipped After Effects for Linux** |
+| Desktop tools (`ofxgen`, `ofxprobe`, `ffgltest`) | yes | yes | not built |
+| The app (`OFX Bridge.app`) | yes | **no** — it is Cocoa, and no replacement is written | no |
 | Browser wrapper shell | served | served | served |
 
-The Windows and Linux shells are built by CI on every release and served by
-the browser wrapper, which tells the visitor which one they are getting and
-that it is untested. They compile; nobody here has a Windows or Linux machine
-to run them on. That is a different claim from "it works", and the project
-says which one it is making.
+Windows moved from "compiled" to "run" by being built and exercised on an ARM64
+Windows 11 guest targeting x64, and again on `windows-latest` in CI. What that
+covers, and the two silent breakages found on the way, are in
+[03-verification.md](03-verification.md).
+
+**The one thing Windows still cannot show is the GL render path.** It compiles
+and it is never executed: WGL needs a window, a window needs a desktop, and the
+machine here runs headless in session 0 where there is none — while a hosted
+runner has no OpenGL 4.1 core driver either. `ffgltest` exits 3 naming which
+wall it hit. Since Resolume drives exactly that path every frame, this is the
+gap that matters, and it is the one a person with a Windows desktop closes in
+about a minute.
+
+There is no Windows generator GUI. `ofxgen` does everything the app does, and
+the browser wrapper covers the no-terminal case for wrapping; a Cocoa window is
+not portable and nothing has been written to replace it.
 
 The Linux column has an honest wrinkle worth stating: FFGL is Resolume's
 format and Resolume has no Linux build, so a Linux FFGL plugin barely exists
 in the wild. The shell is there because OpenFX hosts on Linux are real
 (Natron, Nuke, Resolve) and because refusing to build it would have been a
 guess about what nobody has; it is not there because there is a queue of
-people waiting for it.
+people waiting for it. Nothing on Linux has been run.

@@ -5,6 +5,50 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Windows is a supported platform, not a code path.** The whole toolset —
+  `ofxwrapper`, `ofxgen`, `ofxprobe`, `ffgltest`, the FFGL→OFX shell and the AE
+  guest — builds for Windows x64 and is self-tested on every release: the corpus
+  from the OpenFX examples, introspection, CPU render, generation, and
+  `ofxgen verify` loading a generated plugin as a host would. Windows CPU render
+  produces the same numbers as macOS, digit for digit.
+- `scripts/build-test-plugins.ps1`, the Windows counterpart of the corpus script.
+- `ofxgen verify` works on Windows, over LoadLibrary/GetProcAddress.
+- `ffgltest` builds everywhere. It takes its context and module loader from
+  `ffglguest/Platform`, so there is one WGL implementation in the repo, and it
+  exits 3 — the existing skip status — when the machine cannot give it a
+  context at all.
+
+### Fixed
+
+- **Wrapped bundles put their binary in `Contents/MacOS` on every platform.** An
+  OFX host reads `Contents/Win64` or `Contents/Linux-x86-64` and only macOS
+  falls back, so every Windows and Linux bundle the generator or the browser
+  wrapper produced was invisible to the host it was built for. Now written for
+  the shell's own platform.
+- **The Windows shell imported `glew32.dll`**, which is on no ordinary machine
+  and in no archive shipped — vcpkg's default triplet is dynamic. Everything is
+  built `x64-windows-static-md` now, and CI fails the release if any artefact
+  imports a library that is not in the zip.
+- The host advertised Metal and OpenCL render on platforms where neither interop
+  is compiled, so a plugin that took the offer failed mid-render instead of
+  being declined at describe time. Both are now gated on the bridge existing,
+  the way CUDA always was.
+- The After Effects guest built for the host architecture rather than the
+  target, so an ARM64 machine cross-compiling x64 handed the linker the wrong
+  slice and got an error about missing symbols.
+- `OFX_SUPPORTS_MULTITHREAD` is defined on every platform. Our implementation is
+  `std::thread` and `std::recursive_mutex`; it had been behind `if(APPLE)`
+  because nothing else had ever been compiled.
+- A shell wrapped on Windows detects an After Effects guest by its `.aex`
+  extension — there is no `CFBundlePackageType` to read there.
+- `ffgltest` writes its diagnostics unbuffered and announces the context attempt
+  before making it, so a run that dies inside a display driver still says how
+  far it got.
+
 ## [0.8.1] — 2026-08-03
 
 ### Added

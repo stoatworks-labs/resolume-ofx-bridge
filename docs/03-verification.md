@@ -207,6 +207,37 @@ code. Both the assertion and the explicit skip exist because of it.
 
 **So every GPU result in this document comes from a real M4 Max, not from CI.**
 
+## Windows
+
+Windows runs the same self-test, from a corpus built by
+`scripts/build-test-plugins.ps1` (the counterpart of the shell script; edit
+both). Run on an ARM64 Windows 11 guest building x64, and on `windows-latest` in
+CI:
+
+| | result |
+|---|---|
+| introspection | 5 plugins found, Custom declined for context — the same verdict as macOS |
+| CPU render | Invert produces exact complements; Gain at `scale=0.5` takes 128 to 64 — the same numbers as macOS |
+| generation | `.dll` plus sidecar manifest per plugin |
+| bundle loading | `ofxgen verify` LoadLibrary's a generated plugin and reads back the same unique id and parameter table macOS produces |
+| wrap-ffgl | writes `Contents\Win64`, and our own OFX host then discovers and describes the wrapped plugin |
+| GL render | **not run** — see below |
+| Metal / OpenCL / CUDA | not advertised in this build, so plugins offering them are declined at describe time rather than failing mid-render |
+
+Two things had to be fixed before any of that could work, and both failed
+silently rather than loudly:
+
+- The wrapped bundle put its binary in `Contents/MacOS` on every platform. Only
+  a macOS host falls back to that directory, so a Windows bundle was not broken,
+  it was invisible — a host scan found nothing and reported nothing.
+- The shell was built with vcpkg's default dynamic triplet, leaving it importing
+  `glew32.dll`, which is on no ordinary machine and was in no archive. Measured
+  with `dumpbin /dependents`, now asserted in CI.
+
+The `ofxprobe --render` numbers matching macOS digit for digit is the useful
+part: the host, the parameter plumbing and the render action are one
+implementation, and it now demonstrably behaves the same under MSVC.
+
 ## What is *not* verified
 
 - **Nothing has run inside Resolume.** Every GL test uses our own offscreen
@@ -224,8 +255,14 @@ code. Both the assertion and the explicit skip exist because of it.
 - **A residual `GL_INVALID_OPERATION` in the legacy path**, most likely our own
   FBO calls wanting the `EXT` entry points under GL 2.1. It does not affect the
   core-profile path that ships.
-- **Windows and Linux are untried.** The code paths exist; `ffgltest` is
-  macOS-only, as it creates its context with CGL directly.
+- **The GL render path on Windows.** Everything else on Windows is now run and
+  asserted (see below); the GL path is compiled and never executed, because the
+  only Windows machine here runs headless in session 0 -- where WGL has no
+  desktop to put its window on -- and a hosted runner has no OpenGL 4.1 core
+  driver. `ffgltest` exits 3 and says which of the two it hit, rather than
+  reporting a pass.
+- **Linux, entirely.** Only the FFGL->OFX shell is built there and nothing has
+  been run.
 - **CUDA, entirely.** Written from the specification, never compiled, never run.
 - **The GPU paths on any machine but the author's.** CI cannot run them, so
   there is exactly one data point of hardware.

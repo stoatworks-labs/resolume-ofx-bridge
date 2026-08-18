@@ -105,6 +105,9 @@ binary plus a JSON manifest, which the plugin reads when the host loads it.
 Download the release, unzip, and open **OFX Bridge.app**: choose a folder of OFX
 plugins (or a single `.ofx.bundle`), choose where to install, press Start.
 
+*On Windows there is no app — `ofxgen.exe` does everything it does, and the
+command-line section below is the whole story.*
+
 ![The OFX Bridge window after a run](docs/demo-ui.png)
 
 The **Add to** buttons fill the destination in for whichever Resolume products
@@ -226,6 +229,11 @@ ranges survive intact.
   [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md).
 - **OpenCL is implemented and verified** (4.2× faster than CPU at 1080p), though
   Metal wins when a plugin offers both.
+- **The Metal and OpenCL interops are macOS.** A Windows build advertises
+  neither, so plugins offering them are declined when they describe themselves
+  rather than failing part-way through a frame; OFX OpenGL render and the CPU
+  path work there as they do on macOS. What is verified on which platform is in
+  [docs/03-verification.md](docs/03-verification.md).
 - **CUDA is written but has never been compiled or run** — it needs an NVIDIA GPU,
   which macOS has not supported since 10.13. The host does not advertise CUDA
   support, so such plugins are declined cleanly rather than failing mid-render.
