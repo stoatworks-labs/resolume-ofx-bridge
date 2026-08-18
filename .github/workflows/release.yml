@@ -129,6 +129,7 @@ jobs:
           }
           if ($bad) { exit 1 }
           Write-Output 'no unshipped imports'
+          exit 0
 
       - name: Self-test against real OFX plugins
         # The Windows half of the macOS self-test, minus the parts a hosted
@@ -180,6 +181,11 @@ jobs:
             exit 1
           }
           Write-Output 'self-test complete'
+          # Explicit, because the step is judged on $LASTEXITCODE and the last
+          # native command here is a test we deliberately allowed to fail: the
+          # skipped GL run leaves 3 behind, and the step then reports a failure
+          # after printing that everything passed.
+          exit 0
 
       - name: Stage the release archive
         shell: bash
