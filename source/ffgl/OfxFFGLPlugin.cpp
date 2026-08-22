@@ -107,10 +107,15 @@ OfxFFGLPlugin::OfxFFGLPlugin()
 	}
 
 	// The About block, after the OFX plugin's own parameters. FFGL has no
-	// window, so the name, the version and the links are parameters the host
-	// draws. See ../StoatworksAboutParams.h.
+	// window, so the name, the version, the maker and the links are parameters
+	// the host draws. See ../StoatworksAboutParams.h.
+	//
+	// The credit is the declared default as well as the answer to
+	// GetTextParameter: nothing in FFGL says which of the two a host reads, and
+	// supplying one but not the other shows a blank line in whichever host
+	// picked the other.
 	_aboutBase = (unsigned int)ctx.params.size();
-	SetParamInfo( _aboutBase, "About", FF_TYPE_TEXT, "" );
+	SetParamInfo( _aboutBase, "About", FF_TYPE_TEXT, stoatworks::about::defaultText() );
 	{
 		unsigned int aboutId = _aboutBase + 1;
 		for( const auto& b : stoatworks::about::buttons() )
