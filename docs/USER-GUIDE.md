@@ -7,15 +7,23 @@ per plugin into Resolume's effects folder.
 **You do not need a compiler.** Each generated bundle is a copy of one prebuilt binary plus a
 JSON manifest that it reads when the host loads it.
 
-> **Before you rely on this:** released at v0.5.1 as a working prototype. The host, the parameter
+> **Before you rely on this:** released at v0.9.1 as a working prototype. The host, the parameter
 > mapping and the pixel path are verified against real OFX plugins by automated harnesses,
 > including a headless OpenGL test that drives a generated bundle exactly as a host would — and
 > generated bundles **have since been run inside Resolume itself on real content**.
 >
-> The release ships a **macOS universal build only**; the Windows and Linux code paths exist but
-> **have never been compiled**. The **CUDA path is written from the specification and has never
-> been compiled or run**. And **licensed commercial plugins will mostly refuse to load** — see
-> [What won't work](#what-wont-work).
+> There is now a **Windows x64 release as well as the macOS universal build**, and Windows runs
+> the same self-test: it finds the same plugins, declines the same ones, and produces the same
+> pixel values digit for digit. What it has *not* done is run the **GL render path** — the one
+> Resolume drives every frame — because that needs a desktop session with an OpenGL 4.1 core
+> driver, and neither the machine here nor a hosted runner is one. That is a narrower gap than
+> "untested", and a real one.
+>
+> **Linux has still never been compiled.** **Metal and OpenCL are macOS only** — a Windows build
+> advertises neither, so plugins wanting them are declined when they introduce themselves rather
+> than failing part-way through a frame. The **CUDA path is written from the specification and
+> has never been compiled or run**. And **licensed commercial plugins will mostly refuse to
+> load** — see [What won't work](#what-wont-work).
 
 ---
 
@@ -23,6 +31,9 @@ JSON manifest that it reads when the host loads it.
 
 Download the release, unzip, and open **OFX Bridge.app**: choose a folder of OFX plugins (or a
 single `.ofx.bundle`), choose where to install, press **Start**.
+
+**On Windows there is no app**, and none is planned. `ofxgen.exe` does everything the window
+does — see the command-line section below, which is the whole story there.
 
 ![The OFX Bridge window after a run, with the log showing what was generated.](demo-ui.png)
 
@@ -179,7 +190,8 @@ named in the log rather than guessed around.
 | **A commercial plugin refuses to license** | Expected. It only licenses to hosts it recognises, and the bridge does not spoof one. |
 | **Effect renders but is slow** | It is on the CPU path — a full GPU round trip per frame. Check whether it advertises Metal. |
 | **OpenGL-render plugin draws nothing** | It probably uses immediate-mode GL, which a core profile forbids. |
-| **Windows or Linux build** | Neither has ever been compiled. macOS only for now. |
+| **A Metal or OpenCL plugin is declined on Windows** | Expected — both interops are macOS. The plugin is turned down at describe time rather than failing mid-frame. |
+| **Linux build** | Never compiled. macOS and Windows x64 only. |
 
 ---
 
