@@ -29,7 +29,7 @@ a real Resolume folder to film it.*
 
 ## Download
 
-**[v0.9.0](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.9.0)** — prebuilt for macOS. Pick your platform:
+**[v0.9.1](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.9.1)** — prebuilt for macOS and Windows. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
@@ -40,9 +40,18 @@ a real Resolume folder to film it.*
 
 </details>
 
+<details>
+<summary><b>Windows</b> — x64</summary>
+
+| Build | Download | Size |
+| --- | --- | --- |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-windows-x86_64.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-windows-x86_64.zip) | 3.0 MB |
+
+</details>
+
 All builds, checksums and release notes: [github.com/stoatworks-labs/resolume-ofx-bridge/releases](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases).
 
-macOS builds are signed and notarised by Apple, so they open normally — no Gatekeeper warning and no quarantine step.
+macOS builds are signed and notarised and open normally. The Windows builds are unsigned, so SmartScreen warns once.
 
 <!-- downloads:end -->
 
