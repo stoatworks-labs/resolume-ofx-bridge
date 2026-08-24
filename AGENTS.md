@@ -350,3 +350,10 @@ store silently (what project load looks like), `--edit` delivers a user edit
 with the action (what the inspector looks like). Behaviour a plugin hangs off
 `changedParam` — presets — only runs under `--edit`. Both accept comma lists
 for multi-component params (`--set colour=1,0.72,0.2`).
+
+## Notes
+
+`docs/NOTES.md` carries this repo's working notes — current status, decisions
+already made, and the traps that have actually bitten. Read it before changing
+anything non-obvious. Cross-cutting fleet knowledge lives in
+[fleet-notes](https://github.com/stoatworks-labs/fleet-notes).
