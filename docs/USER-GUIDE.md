@@ -7,7 +7,7 @@ per plugin into Resolume's effects folder.
 **You do not need a compiler.** Each generated bundle is a copy of one prebuilt binary plus a
 JSON manifest that it reads when the host loads it.
 
-> **Before you rely on this:** released at v0.9.1 as a working prototype. The host, the parameter
+> **Before you rely on this:** released at v0.9.2 as a working prototype. The host, the parameter
 > mapping and the pixel path are verified against real OFX plugins by automated harnesses,
 > including a headless OpenGL test that drives a generated bundle exactly as a host would — and
 > generated bundles **have since been run inside Resolume itself on real content**.
