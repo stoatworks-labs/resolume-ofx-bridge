@@ -29,7 +29,7 @@ a real Resolume folder to film it.*
 
 ## Download
 
-**[v0.9.2](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.9.2)** — prebuilt for macOS and Windows. Pick your platform:
+**[v0.9.3](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.9.3)** — prebuilt for macOS and Windows. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
