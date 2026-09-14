@@ -5,7 +5,20 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.3] — 2026-09-04
+
+### Changed
+
+- The user guide's status line names the current release, and its PDF is rebuilt.
+
+## [0.9.2] — 2026-08-25
+
+### Changed
+
+- The guide said Windows had never compiled; it has shipped since 0.9.1, and the
+  guide now says what it is and what it still is not.
+
+## [0.9.1] — 2026-08-22
 
 ### Added
 
@@ -48,6 +61,31 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `ffgltest` writes its diagnostics unbuffered and announces the context attempt
   before making it, so a run that dies inside a display driver still says how
   far it got.
+
+## [0.9.0] — 2026-08-18
+
+### Added
+
+- **The shell describes itself when there is no manifest.** A wrapped bundle works
+  with `Contents/manifest.json` deleted: the shell finds the one bundle in
+  `Contents/Guest`, tells an After Effects guest from an FFGL one by its own
+  `Info.plist`, takes its identity from the bundle filename and asks the guest
+  for its parameter table at describe time. The manifest is an override rather
+  than a requirement — which makes generating a wrapped plugin a pure file copy.
+- **A browser build of the wrapper**, `web/`. Pick the guest bundle and an output
+  folder and the page writes shell + guest + `Info.plist` through the File System
+  Access API; nothing is uploaded. It serves the shell for the visitor's own
+  platform and says which one it is handing over — the macOS shell is the one
+  that has been run; Windows and Linux compile and are untested, and Linux carries
+  FFGL guests only.
+- **Windows and Linux backends for the FFGL guest.** Loading a shared library and
+  getting an offscreen GL context move into `Platform.{h,cpp}`: CGL on macOS as
+  before, WGL on Windows, surfaceless EGL on Linux. Both new paths refuse to
+  start rather than limp without a 4.1 core profile.
+- The shell and the generator guests build on every platform, the Rust After
+  Effects guest builds natively off macOS, and there is deliberately no After
+  Effects guest on Linux, because there is no Linux After Effects.
+- `ofxprobe --set-string`, for plugins that load a file.
 
 ## [0.8.1] — 2026-08-03
 
