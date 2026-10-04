@@ -1845,8 +1845,14 @@ int Session::run( const ofxbridge::PluginDesc& target, Job base, std::vector< Jo
 int main( int argc, char** argv )
 {
 	// Line-buffered, so stdout and a plugin's stderr interleave in order when
-	// both go to one log.
+	// both go to one log. MSVC has no line buffering (_IOLBF is full buffering
+	// there) and treats a size under 2 as an invalid parameter, which ends the
+	// process before it prints a word; unbuffered keeps the order instead.
+#if defined( _WIN32 )
+	setvbuf( stdout, nullptr, _IONBF, 0 );
+#else
 	setvbuf( stdout, nullptr, _IOLBF, 0 );
+#endif
 
 	Options opt;
 	Job base;
