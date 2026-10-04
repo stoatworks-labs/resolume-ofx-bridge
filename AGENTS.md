@@ -96,6 +96,14 @@ hand-written OFX port on the probe's test frame.
   A wrapped FFGL guest cannot prove it byte for byte: run frame by frame it is not
   deterministic, and rendered alone it has no elapsed time to show a rate with. A
   wrapped bundle carries its own copy of the shell, so only a re-wrap picks this up.
+- **Declare the output frame-varying, or Fusion repeats a generator's first frame.**
+  `getClipPreferences` calls `setOutputFrameVarying( true )`: the guest is handed
+  the frame's time and most FFGL plugins animate with it, and the shell cannot tell
+  which do. Undeclared, a host may treat the output as fixed while inputs and
+  parameters hold still, and Resolve 21.1's Fusion page does: a wrapped FFGL Orrery
+  (a source) rendered frames 20-22 byte-identical before the flag and moves after
+  (2026-10-04). Wrapped effects fed by a MediaIn were re-rendered every frame either
+  way. Like the frame-rate fix, it reaches a user only through a re-wrap.
 
 ## Layout
 

@@ -415,6 +415,24 @@ public:
 		}
 	}
 
+	/// The guest is handed the frame's time, and most FFGL plugins animate with
+	/// it; the shell cannot tell which do. Unless a plugin says so, a host may
+	/// treat its output as fixed while its inputs and parameters are, and
+	/// Resolve's Fusion page does: it rendered every fleet generator once and
+	/// repeated that frame. A preference, not a requirement: a host that does not
+	/// know the property is left to its own default rather than failing the
+	/// effect.
+	void getClipPreferences( OFX::ClipPreferencesSetter& preferences ) override
+	{
+		try
+		{
+			preferences.setOutputFrameVarying( true );
+		}
+		catch( ... )
+		{
+		}
+	}
+
 	void render( const OFX::RenderArguments& args ) override
 	{
 		const Manifest& m = manifest();
