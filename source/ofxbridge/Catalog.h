@@ -98,7 +98,8 @@ std::vector< std::string > defaultSearchPaths();
 
 /// Scan `searchPaths`, load every bundle found, and describe every plugin.
 /// `log` accumulates human-readable progress and any load failures.
-std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& searchPaths, std::string& log );
+std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& searchPaths, std::string& log,
+										   const std::string& context = "OfxImageEffectContextFilter" );
 
 /// Serialise a described plugin to the JSON manifest a generated wrapper reads
 /// at load time.
@@ -116,9 +117,16 @@ class Effect;
 ///
 /// Returns nullptr with `error` set on failure. The returned effect has *not*
 /// had init() called on it yet, so the caller can set a frame size first.
+///
+/// `context` picks the context to instantiate in
+/// (default Filter, as before). When more than one bundle in the scanned
+/// directory carries `identifier`, the one at `bundlePath` is now preferred over
+/// the first match; `chosenBundle` (if given) reports which was used.
 std::unique_ptr< Effect > createEffect( Host& host,
 										const std::string& bundlePath,
 										const std::string& identifier,
-										std::string& error );
+										std::string& error,
+										const std::string& context = "OfxImageEffectContextFilter",
+										std::string* chosenBundle = nullptr );
 
 } // namespace ofxbridge

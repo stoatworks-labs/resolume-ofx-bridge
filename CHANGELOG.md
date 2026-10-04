@@ -5,6 +5,27 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `ofxprobe` is a command-line OpenFX test host
+  ([docs/06-ofxprobe.md](docs/06-ofxprobe.md)): `--in`/`--seq` image inputs,
+  `--time`, `--frame-rate`, the Transition, Generator and General contexts,
+  `--key` keyframes, `--press` for push buttons, `--batch`, `--strict-frames`,
+  `--no-system-dirs`, and `--quirks fusion`, which withholds the frame rate
+  and render-status properties more strictly than Resolve's Fusion page does.
+  The fleet's `verify.sh` scripts run their Fusion and Transition checks with it.
+
+### Changed
+
+- `ofxprobe` reports 25 fps by default (it was 60), its renders print the
+  instance, timeline, output mean and hash, and a failed render names its OFX
+  status. Every original flag otherwise behaves as before.
+- `createEffect` prefers the bundle at the requested path when more than one
+  scanned bundle carries the identifier, instead of the first found, so an
+  installed copy can no longer stand in for it.
+
 ## [0.9.3] — 2026-09-04
 
 ### Changed

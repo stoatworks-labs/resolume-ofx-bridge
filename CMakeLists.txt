@@ -84,6 +84,10 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable( ofxprobe source/probe/main.cpp )
 target_link_libraries( ofxprobe PRIVATE ofxbridge )
+# PNG/JPEG/TIFF in and PNG out go through ImageIO.
+if( APPLE )
+	target_link_libraries( ofxprobe PRIVATE "-framework ImageIO" "-framework CoreGraphics" "-framework CoreFoundation" )
+endif()
 
 # ---------------------------------------------------------------------------
 # ofxwrapper - the generic FFGL plugin

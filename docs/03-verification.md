@@ -62,6 +62,11 @@ Verified:
 `--set` drives parameters through `Effect::setParamValue` — the same path the
 FFGL wrapper uses — so this covers the parameter plumbing as well as the render.
 
+Beyond one frame at time 0, `ofxprobe` is a test host in its own right —
+image inputs and sequences, any time, the Transition and Generator contexts,
+keyframes, and `--quirks fusion` for Resolve's Fusion page. See
+[06-ofxprobe.md](06-ofxprobe.md).
+
 ## Level 3 — bundle loading
 
 ```bash

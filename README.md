@@ -276,6 +276,8 @@ ranges survive intact.
   and what is not
 - [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md) — where a frame
   actually goes, and which GPU paths exist
+- [docs/06-ofxprobe.md](docs/06-ofxprobe.md) — `ofxprobe` as a command-line
+  OpenFX test host: sequences, time, contexts, keyframes, `--quirks fusion`
 - [AGENTS.md](AGENTS.md) — onboarding, invariants and the traps found along the way
 
 <!-- attributions:start -->

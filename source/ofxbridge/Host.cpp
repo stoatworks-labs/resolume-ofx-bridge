@@ -2,6 +2,7 @@
 #include "Params.h"
 
 #include "ofxImageEffect.h"
+#include "ofxParam.h"
 #include "ofxGPURender.h"
 #include "ofxProgress.h"
 #include "ofxTimeLine.h"
@@ -14,6 +15,40 @@
 #include <thread>
 
 namespace ofxbridge {
+
+namespace {
+
+// Drops a property from a set entirely, so the plugin's get or dimension query
+// answers kOfxStatErrUnknown, as from a host that never provided it.
+// Property::Set has no remove and external/openfx stays unpatched, but its map
+// is protected, and a pointer to a protected member formed through a derived
+// class may be used on any Set.
+struct PropertySetAccess : OFX::Host::Property::Set
+{
+	static OFX::Host::Property::PropertyMap OFX::Host::Property::Set::* map()
+	{
+		return &PropertySetAccess::_props;
+	}
+};
+
+void removeProperty( OFX::Host::Property::Set& set, const std::string& name )
+{
+	OFX::Host::Property::PropertyMap& props = set.*PropertySetAccess::map();
+	const auto found = props.find( name );
+	if( found != props.end() )
+	{
+		delete found->second;// the Set owns its properties
+		props.erase( found );
+	}
+}
+
+} // namespace
+
+HostOptions& hostOptions()
+{
+	static HostOptions options;
+	return options;
+}
 
 // ---------------------------------------------------------------------------
 // Frame
@@ -81,6 +116,28 @@ Image::Image( void* data, int rowBytes, int width, int height, const std::string
 Clip::Clip( Effect* effect, OFX::Host::ImageEffect::ClipDescriptor& desc, bool isOutput ) :
 	OFX::Host::ImageEffect::ClipInstance( effect, desc ), _effect( effect ), _isOutput( isOutput )
 {
+	// --quirks fusion: a host at least as hostile as Resolve 21.1's Fusion page,
+	// which gives no clip a frame rate (measured 2026-10-04). Every clip here
+	// has no frame rate (get -> kOfxStatErrUnknown), a frame range of [0, 0],
+	// and the unmapped rate/range present with dimension 0. Only the
+	// plugin-facing property set changes; the host's own C++ view of the clip
+	// (getFrameRate() etc.) is untouched.
+	if( hostOptions().fusionQuirks )
+	{
+		using OFX::Host::Property::PropSpec;
+		removeProperty( _properties, kOfxImageEffectPropFrameRate );
+
+		removeProperty( _properties, kOfxImageEffectPropFrameRange );
+		const PropSpec range = { kOfxImageEffectPropFrameRange, OFX::Host::Property::eDouble, 2, true, "0" };
+		_properties.createProperty( range );
+
+		for( const char* name : { kOfxImageEffectPropUnmappedFrameRate, kOfxImageEffectPropUnmappedFrameRange } )
+		{
+			removeProperty( _properties, name );
+			const PropSpec empty = { name, OFX::Host::Property::eDouble, 0, true, "" };
+			_properties.createProperty( empty );
+		}
+	}
 }
 
 const std::string& Clip::getUnmappedBitDepth() const
@@ -112,13 +169,21 @@ double Clip::getAspectRatio() const
 
 double Clip::getFrameRate() const
 {
-	return 60.0;
+	// One rate for the whole effect: 60 in the bridge, --frame-rate in ofxprobe.
+	return _effect->getFrameRate();
 }
 
 void Clip::getFrameRange( double& startFrame, double& endFrame ) const
 {
-	startFrame = 0.0;
-	endFrame   = 0.0;
+	// An input fed from a source reports that source's range (a sequence's
+	// first..last frame). Everything else reports the effect's timeline, which
+	// is [0, 0] unless the test host sets one -- what the bridge always said.
+	if( _source != nullptr && !_isOutput )
+	{
+		_source->frameRange( startFrame, endFrame );
+		return;
+	}
+	_effect->timeline( startFrame, endFrame );
 }
 
 const std::string& Clip::getFieldOrder() const
@@ -131,7 +196,7 @@ bool Clip::getConnected() const
 {
 	// The output clip is always connected; an input clip is connected only when
 	// the FFGL layer has actually bound a frame to it this pass.
-	return _isOutput ? true : ( _frame != nullptr );
+	return _isOutput ? true : ( _frame != nullptr || _source != nullptr );
 }
 
 double Clip::getUnmappedFrameRate() const
@@ -196,7 +261,7 @@ OFX::Host::ImageEffect::Texture* Clip::loadTexture( OfxTime /*time*/, const char
 	return tex;
 }
 
-OFX::Host::ImageEffect::Image* Clip::getImage( OfxTime /*time*/, const OfxRectD* /*optionalBounds*/ )
+OFX::Host::ImageEffect::Image* Clip::getImage( OfxTime time, const OfxRectD* /*optionalBounds*/ )
 {
 	// HostSupport expects a freshly retained image; the plugin releases it via
 	// clipReleaseImage, which drops the refcount and deletes it.
@@ -207,6 +272,21 @@ OFX::Host::ImageEffect::Image* Clip::getImage( OfxTime /*time*/, const OfxRectD*
 	if( _metalBuffer != nullptr )
 		return new Image( _metalBuffer, _metalRowBytes, _metalWidth, _metalHeight, kOfxBitDepthByte,
 						  kOfxImageComponentRGBA, getPremult() );
+
+	// A time-addressed source answers for any time the plugin asks
+	// about; "no frame there" is a null image, which the OFX Support library
+	// turns into a null fetchImage (kOfxStatFailed) -- what a host does past a
+	// clip's ends.
+	if( _source != nullptr && !_isOutput )
+	{
+		Frame* f = _source->frameAt( time );
+		if( f == nullptr )
+			return nullptr;
+		auto* img = new Image( f->data.data(), f->rowBytes, f->width, f->height, f->bitDepth, f->components,
+							   getPremult() );
+		img->setStringProperty( kOfxImagePropUniqueIdentifier, getName() + "@" + _source->frameId( time ) );
+		return img;
+	}
 
 	if( _frame == nullptr )
 		return nullptr;
@@ -225,6 +305,11 @@ Effect::Effect( OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
 				Host* host ) :
 	OFX::Host::ImageEffect::Instance( plugin, desc, context, false ), _host( host )
 {
+	// --quirks fusion: the effect instance has no frame rate either. Stricter
+	// than Fusion, which does give the effect one, so a plugin that survives
+	// here survives there.
+	if( hostOptions().fusionQuirks )
+		removeProperty( _properties, kOfxImageEffectPropFrameRate );
 }
 
 bool Effect::init( std::string& error )
@@ -704,7 +789,8 @@ bool Effect::editParamValue( const std::string& name, const std::vector< double 
 
 	OfxPointD renderScale = { 1.0, 1.0 };
 	beginInstanceChangedAction( kOfxChangeUserEdited );
-	paramInstanceChangedAction( name, kOfxChangeUserEdited, 0.0, renderScale );
+	// At the current time: 0 unless the test host moved it (--time).
+	paramInstanceChangedAction( name, kOfxChangeUserEdited, _time, renderScale );
 	endInstanceChangedAction( kOfxChangeUserEdited );
 	return true;
 }
@@ -770,12 +856,13 @@ double Effect::getProjectPixelAspectRatio() const
 
 double Effect::getEffectDuration() const
 {
-	return 1.0;
+	// [0, 0] -> 1, as the bridge always reported.
+	return _rangeLast - _rangeFirst + 1.0;
 }
 
 double Effect::getFrameRate() const
 {
-	return 60.0;
+	return _frameRate;
 }
 
 double Effect::getFrameRecursive() const
@@ -819,8 +906,204 @@ void Effect::timeLineGotoTime( double )
 
 void Effect::timeLineGetBounds( double& t1, double& t2 )
 {
-	t1 = 0.0;
-	t2 = 0.0;
+	t1 = _rangeFirst;
+	t2 = _rangeLast;
+}
+
+// ---------------------------------------------------------------------------
+// test-host additions
+// ---------------------------------------------------------------------------
+
+bool Effect::getClipPreferences()
+{
+	if( !OFX::Host::ImageEffect::Instance::getClipPreferences() )
+		return false;
+	if( _forcedDepth.empty() )
+		return true;
+	for( auto& kv : _clips )
+	{
+		OFX::Host::ImageEffect::ClipInstance* clip = kv.second;
+		if( clip != nullptr && isChromaticComponent( clip->getComponents() ) )
+			clip->setPixelDepth( _forcedDepth );
+	}
+	return true;
+}
+
+bool Effect::bindSource( const std::string& clipName, FrameSource* source )
+{
+	Clip* clip = dynamic_cast< Clip* >( getClip( clipName ) );
+	if( clip == nullptr )
+		return false;
+	clip->setSource( source );
+	return true;
+}
+
+bool Effect::renderBound( Frame& out, double time, std::string& error )
+{
+	_time = time;
+	setFrameSize( out.width, out.height );
+
+	Clip* output = dynamic_cast< Clip* >( getClip( kOfxImageEffectOutputClipName ) );
+	if( output == nullptr )
+	{
+		error = "effect has no output clip";
+		return false;
+	}
+	runGetClipPrefsConditionally();
+	output->setFrame( &out );
+
+	OfxRectI window = { 0, 0, out.width, out.height };
+	OfxPointD scale = { 1.0, 1.0 };
+
+	const bool fusion = hostOptions().fusionQuirks;
+	OfxStatus st      = fusion ? fusionSequenceAction( kOfxImageEffectActionBeginSequenceRender, time )
+							   : beginRenderAction( time, time, 1.0, /*interactive*/ false, scale,
+													/*sequentialRender*/ false, /*interactiveRender*/ false );
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		output->setFrame( nullptr );
+		error = "begin render failed";
+		return false;
+	}
+
+	st = fusion ? fusionRenderAction( time, window )
+				: renderAction( time, kOfxImageFieldNone, window, scale,
+								/*sequentialRender*/ false, /*interactiveRender*/ false, /*draftRender*/ false );
+
+	if( fusion )
+		fusionSequenceAction( kOfxImageEffectActionEndSequenceRender, time );
+	else
+		endRenderAction( time, time, 1.0, false, scale, false, false );
+	output->setFrame( nullptr );
+
+	if( st != kOfxStatOK && st != kOfxStatReplyDefault )
+	{
+		static const char* names[] = { "kOfxStatOK", "kOfxStatFailed", "kOfxStatErrFatal", "kOfxStatErrUnknown",
+									   "kOfxStatErrMissingHostFeature", "kOfxStatErrUnsupported", "kOfxStatErrExists",
+									   "kOfxStatErrFormat", "kOfxStatErrMemory", "kOfxStatErrBadHandle",
+									   "kOfxStatErrBadIndex", "kOfxStatErrValue", "kOfxStatReplyYes", "kOfxStatReplyNo",
+									   "kOfxStatReplyDefault", "kOfxStatUnlicensed" };
+		char buf[ 128 ];
+		snprintf( buf, sizeof( buf ), "kOfxImageEffectActionRender failed (status %d%s%s)", (int)st,
+				  st >= 0 && st < (int)( sizeof( names ) / sizeof( names[ 0 ] ) ) ? " " : "",
+				  st >= 0 && st < (int)( sizeof( names ) / sizeof( names[ 0 ] ) ) ? names[ st ] : "" );
+		error = buf;
+		return false;
+	}
+	return true;
+}
+
+// HostSupport's begin/render/end always carry the two render-status ints;
+// Fusion's do not. These are the same actions with exactly those two left out.
+OfxStatus Effect::fusionSequenceAction( const char* action, double time )
+{
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxImageEffectPropFrameRange, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropFrameStep, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxPropIsInteractive, OFX::Host::Property::eInt, 1, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		OFX::Host::Property::propSpecEnd
+	};
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setDoubleProperty( kOfxImageEffectPropFrameRange, time, 0 );
+	inArgs.setDoubleProperty( kOfxImageEffectPropFrameRange, time, 1 );
+	inArgs.setDoubleProperty( kOfxImageEffectPropFrameStep, 1.0 );
+	inArgs.setIntProperty( kOfxPropIsInteractive, 0 );
+	const OfxPointD scale = { 1.0, 1.0 };
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	return mainEntry( action, this->getHandle(), &inArgs, 0 );
+}
+
+OfxStatus Effect::fusionRenderAction( double time, const OfxRectI& window )
+{
+	static const OFX::Host::Property::PropSpec inStuff[] = {
+		{ kOfxPropTime, OFX::Host::Property::eDouble, 1, true, "0" },
+		{ kOfxImageEffectPropFieldToRender, OFX::Host::Property::eString, 1, true, "" },
+		{ kOfxImageEffectPropRenderWindow, OFX::Host::Property::eInt, 4, true, "0" },
+		{ kOfxImageEffectPropRenderScale, OFX::Host::Property::eDouble, 2, true, "0" },
+		{ kOfxImageEffectPropRenderQualityDraft, OFX::Host::Property::eInt, 1, true, "0" },
+		OFX::Host::Property::propSpecEnd
+	};
+	OFX::Host::Property::Set inArgs( inStuff );
+	inArgs.setStringProperty( kOfxImageEffectPropFieldToRender, kOfxImageFieldNone );
+	inArgs.setDoubleProperty( kOfxPropTime, time );
+	inArgs.setIntPropertyN( kOfxImageEffectPropRenderWindow, &window.x1, 4 );
+	const OfxPointD scale = { 1.0, 1.0 };
+	inArgs.setDoublePropertyN( kOfxImageEffectPropRenderScale, &scale.x, 2 );
+	inArgs.setIntProperty( kOfxImageEffectPropRenderQualityDraft, 0 );
+	return mainEntry( kOfxImageEffectActionRender, this->getHandle(), &inArgs, 0 );
+}
+
+bool Effect::pressParam( const std::string& name, OfxStatus& status, std::string& error )
+{
+	OFX::Host::Param::Instance* p = getParam( name );
+	if( p == nullptr )
+	{
+		error = "no parameter named '" + name + "'";
+		return false;
+	}
+	OfxPointD renderScale = { 1.0, 1.0 };
+	beginInstanceChangedAction( kOfxChangeUserEdited );
+	status = paramInstanceChangedAction( name, kOfxChangeUserEdited, _time, renderScale );
+	endInstanceChangedAction( kOfxChangeUserEdited );
+	return true;
+}
+
+bool Effect::setParamKeys( const std::string& name, const std::vector< ParamKey >& keys, std::string& error )
+{
+	OFX::Host::Param::Instance* p = getParam( name );
+	if( p == nullptr )
+	{
+		error = "no parameter named '" + name + "'";
+		return false;
+	}
+	ValueAccess* v = dynamic_cast< ValueAccess* >( p );
+	if( v == nullptr || v->componentCount() == 0 || !v->setKeys( keys ) )
+	{
+		error = "parameter '" + name + "' (" + p->getType() + ") cannot be keyed";
+		return false;
+	}
+	p->getProperties().setIntProperty( kOfxParamPropIsAnimating, keys.empty() ? 0 : 1 );
+	return true;
+}
+
+bool Effect::getParamValueAt( const std::string& name, double time, std::vector< double >& values )
+{
+	OFX::Host::Param::Instance* p = getParam( name );
+	if( p == nullptr )
+		return false;
+	ValueAccess* v = dynamic_cast< ValueAccess* >( p );
+	if( v == nullptr || v->componentCount() == 0 )
+		return false;
+	v->getValuesAt( time, values );
+	return true;
+}
+
+bool Effect::queryIdentity( double time, int width, int height, std::string& clip, double& identityTime )
+{
+	OfxTime t        = time;
+	OfxRectI window  = { 0, 0, width, height };
+	OfxPointD scale  = { 1.0, 1.0 };
+	std::string name;
+	const OfxStatus st = isIdentityAction( t, kOfxImageFieldNone, window, scale, name );
+	if( st != kOfxStatOK || name.empty() )
+		return false;
+	clip         = name;
+	identityTime = t;
+	return true;
+}
+
+std::map< std::string, std::vector< OfxRangeD > > Effect::queryFramesNeeded( double time, bool* answered )
+{
+	std::map< std::string, std::vector< OfxRangeD > > out;
+	OFX::Host::ImageEffect::RangeMap ranges;
+	const OfxStatus st = getFrameNeededAction( time, ranges );
+	if( answered != nullptr )
+		*answered = st == kOfxStatOK;
+	for( auto& kv : ranges )
+		if( kv.first != nullptr )
+			out[ kv.first->getName() ] = kv.second;
+	return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -839,14 +1122,22 @@ Host::Host()
 	_properties.setIntProperty( kOfxImageEffectPropSupportsOverlays, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSupportsMultiResolution, 0 );
 	_properties.setIntProperty( kOfxImageEffectPropSupportsTiles, 0 );
-	_properties.setIntProperty( kOfxImageEffectPropTemporalClipAccess, 0 );
+	// 0 in the bridge (Resolume hands over one frame); the test host may say 1.
+	_properties.setIntProperty( kOfxImageEffectPropTemporalClipAccess, hostOptions().temporalAccess );
 
 	// RGBA only: that is all an FFGL texture can carry.
 	_properties.setStringProperty( kOfxImageEffectPropSupportedComponents, kOfxImageComponentRGBA, 0 );
 
 	// Filter is the only context that maps onto an FFGL effect slot. Generator
 	// and General are deliberately excluded; see docs/01-architecture.md.
-	_properties.setStringProperty( kOfxImageEffectPropSupportedContexts, kOfxImageEffectContextFilter, 0 );
+	//
+	// The test host may add Transition/Generator/General; the default
+	// list is Filter alone, exactly as before.
+	{
+		const auto& contexts = hostOptions().contexts;
+		for( size_t i = 0; i < contexts.size(); ++i )
+			_properties.setStringProperty( kOfxImageEffectPropSupportedContexts, contexts[ i ], (int)i );
+	}
 
 	_properties.setStringProperty( kOfxImageEffectPropSupportedPixelDepths, kOfxBitDepthFloat, 0 );
 	_properties.setStringProperty( kOfxImageEffectPropSupportedPixelDepths, kOfxBitDepthByte, 1 );

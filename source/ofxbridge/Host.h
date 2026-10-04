@@ -21,6 +21,8 @@
 #include "ofxhMemory.h"
 #include "ofxhInteract.h"
 
+#include "Params.h"
+
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -53,6 +55,37 @@ struct Frame
 
 class Host;
 class Effect;
+
+/// Process-wide knobs the test host sets BEFORE the
+/// first Host is constructed (the Host constructor reads them). The defaults
+/// reproduce the bridge exactly: Filter only, no temporal clip access.
+struct HostOptions
+{
+	/// kOfxImageEffectPropSupportedContexts, in order.
+	std::vector< std::string > contexts = { "OfxImageEffectContextFilter" };
+	/// kOfxImageEffectPropTemporalClipAccess.
+	int temporalAccess = 0;
+	/// --quirks fusion: present the frame-rate/range and render-status
+	/// properties the way DaVinci Resolve 21.1's Fusion page does (see
+	/// Effect/Clip constructors and Effect::renderBound).
+	bool fusionQuirks = false;
+};
+HostOptions& hostOptions();
+
+/// Feeds an input clip with a frame per time, so the
+/// plugin's clipGetImage at any time (temporal access) gets a real answer.
+class FrameSource
+{
+public:
+	virtual ~FrameSource() = default;
+	/// The frame shown at `time`, or nullptr for "no image" (a clip end).
+	/// The frame must stay valid until the source is destroyed.
+	virtual Frame* frameAt( double time ) = 0;
+	/// The clip's frame range, reported as kOfxImageEffectPropFrameRange.
+	virtual void frameRange( double& first, double& last ) const = 0;
+	/// A stable label for the frame at `time` (used as the image unique id).
+	virtual std::string frameId( double time ) const = 0;
+};
 
 /// The property set an OFX plugin expects from clipGetImage.
 ///
@@ -97,6 +130,17 @@ public:
 		_frame = frame;
 	}
 
+	/// Feed this (input) clip from a time-addressed source. Takes
+	/// precedence over setFrame for getImage, frame range and connectedness.
+	void setSource( FrameSource* source )
+	{
+		_source = source;
+	}
+	FrameSource* source() const
+	{
+		return _source;
+	}
+
 	/// Point this clip at an `id<MTLBuffer>` for the duration of one render.
 	/// Taken as void* so this header stays free of Objective-C.
 	void setMetalBuffer( void* buffer, int rowBytes, int width, int height )
@@ -130,6 +174,7 @@ public:
 private:
 	Effect* _effect;
 	Frame* _frame = nullptr;
+	FrameSource* _source = nullptr;
 	bool _isOutput;
 
 	void* _metalBuffer = nullptr;
@@ -144,7 +189,7 @@ private:
 };
 
 /// A live instance of an OFX effect, in the "Filter" context.
-class Effect : public OFX::Host::ImageEffect::Instance
+class Effect : public OFX::Host::ImageEffect::Instance, public TimeSource
 {
 public:
 	Effect( OFX::Host::ImageEffect::ImageEffectPlugin* plugin,
@@ -238,6 +283,81 @@ public:
 	/// the sliders, say — only happens through this path.
 	bool editParamValue( const std::string& name, const std::vector< double >& values );
 
+	// -- test-host additions ---------------------------
+
+	/// The time param reads with no time argument answer for, and the time
+	/// instance-changed actions are sent at. Render sets it too.
+	void setCurrentTime( double t )
+	{
+		_time = t;
+	}
+	double paramTime() const override
+	{
+		return _time;
+	}
+
+	/// Frame rate reported for the effect and every clip (the bridge says 60).
+	void setFrameRateValue( double fps )
+	{
+		_frameRate = fps;
+	}
+	/// The timeline [first, last] in frames: effect duration, output clip
+	/// frame range and timeLineGetBounds. Default [0, 0] (duration 1).
+	void setTimeline( double first, double last )
+	{
+		_rangeFirst = first;
+		_rangeLast  = last;
+	}
+	void timeline( double& first, double& last ) const
+	{
+		first = _rangeFirst;
+		last  = _rangeLast;
+	}
+
+	/// Force every clip to this pixel depth after each clip-preferences pass, so
+	/// what a clip reports matches the images actually delivered. Empty (the
+	/// default) leaves HostSupport's negotiation alone, as the bridge does.
+	void setForcedDepth( const std::string& depth )
+	{
+		_forcedDepth = depth;
+	}
+	bool getClipPreferences() override;
+
+	/// Feed an input clip by name. Returns false if the plugin has no such clip.
+	bool bindSource( const std::string& clipName, FrameSource* source );
+
+	/// Render with the bound sources into `out` at `time`.
+	bool renderBound( Frame& out, double time, std::string& error );
+
+	/// kOfxActionInstanceChanged for `name` (a push button press), at the
+	/// current time. Returns the plugin's status in `status`.
+	bool pressParam( const std::string& name, OfxStatus& status, std::string& error );
+
+	/// Replace a numeric param's animation with linear keys.
+	bool setParamKeys( const std::string& name, const std::vector< ParamKey >& keys, std::string& error );
+	/// A numeric param's value at an arbitrary time.
+	bool getParamValueAt( const std::string& name, double time, std::vector< double >& values );
+
+	/// kOfxImageEffectActionIsIdentity at `time`. True if the plugin says the
+	/// output is `clip` at `identityTime`.
+	bool queryIdentity( double time, int width, int height, std::string& clip, double& identityTime );
+
+	/// kOfxImageEffectActionGetFramesNeeded at `time`: clip name -> ranges.
+	/// When the plugin does not answer (no temporal access, or it does not
+	/// implement the action) every input gets the default [time, time] and
+	/// `answered` is false.
+	std::map< std::string, std::vector< OfxRangeD > > queryFramesNeeded( double time, bool* answered = nullptr );
+
+	void clearMessages()
+	{
+		_messages.clear();
+	}
+
+	/// --quirks fusion: begin/end-sequence and render without the
+	/// sequential/interactive render-status properties.
+	OfxStatus fusionSequenceAction( const char* action, double time );
+	OfxStatus fusionRenderAction( double time, const OfxRectI& window );
+
 	/// Fired when the PLUGIN sets one of its own params (HostSupport routes
 	/// paramSetValue here via paramChangedByPlugin). The FFGL layer uses it to
 	/// keep its value table fresh and tell Resolume to re-read.
@@ -294,6 +414,10 @@ private:
 	int _width  = 1920;
 	int _height = 1080;
 	double _time = 0.0;
+	double _frameRate  = 60.0;
+	double _rangeFirst = 0.0;
+	double _rangeLast  = 0.0;
+	std::string _forcedDepth;
 	std::vector< std::string > _messages;
 };
 

@@ -91,7 +91,7 @@ hand-written OFX port on the probe's test frame.
   the source clip and the effect, each in its own `try`, else 24 (Resolve's default
   timeline rate). In Fusion that is the effect's rate, which follows the timeline: a
   raw-API probe plugin read 24 there in a 24 fps project and 25 in a 25 fps one
-  (2026-10-04). Checked with a scratch `ofxprobe` whose `--quirks fusion` is stricter
+  (2026-10-04). Checked with `ofxprobe --quirks fusion`, which is stricter
   than Fusion and withholds the effect's rate too: the old shell fails under it; the
   new one renders and hands the guest `setTime( 1.25 )` at frame 30, exactly as a
   24 fps host does.
@@ -165,6 +165,26 @@ hand-written OFX port on the probe's test frame.
   storage. See `Params.{h,cpp}`.
 - **`CFFGLPlugin::InitGL` dereferences its viewport argument unconditionally**
   (`FFGLPluginSDK.h:59`, `currentViewport = *vp`). Passing null traps.
+- **`external/openfx` stays unpatched.** HostSupport has no way to remove a
+  property or keep `PluginCache`'s constructor off the system folders, but
+  `Property::Set::_props` and `PluginCache::_pluginPath` are protected:
+  `removeProperty` in `Host.cpp` reaches the map through a member pointer
+  formed in a derived class, and `BridgePluginCache` in `Catalog.cpp` clears the
+  path after the base constructor. `~PluginCache` is not virtual, so hold the
+  derived type, never delete one through a base pointer.
+
+### The test host shares the library
+
+`ofxprobe` is also a test host for OFX ports ([docs/06-ofxprobe.md](docs/06-ofxprobe.md)):
+stills and sequences, any time, Transition/Generator contexts, keyframes, a
+stricter-than-Fusion `--quirks fusion`. Its knobs live in `Host`/`Params`/
+`Catalog`, which the wrapper and the app link too, so the rule is: **only
+`ofxprobe` sets them, and their defaults are what the bridge always
+reported** -- `hostOptions()` all off, `setFrameRateValue` unset (60),
+timeline `[0, 0]`, no forced depth, no `FrameSource` bound (an input is
+connected only when it has a frame), no keys (every param one constant).
+Anything added there must keep that: a wrapper generated before and after must
+render byte-identical frames through `ffgltest`.
 
 ### OpenGL render path
 

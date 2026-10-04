@@ -103,11 +103,34 @@ void appendDoubleArray( std::ostringstream& o, const char* key, const std::vecto
 	o << "]";
 }
 
+// HostSupport's PluginCache constructor puts OFX_PLUGIN_PATH and the system
+// plugin folder on its own search path. Under OFXBRIDGE_NO_SYSTEM_DIRS
+// (ofxprobe --no-system-dirs) it searches nothing but what the caller adds,
+// so an installed copy of a plugin cannot shadow the build under test. Done
+// here, after the base constructor, rather than by patching external/openfx.
+// Unset, it is HostSupport's cache exactly.
+struct BridgePluginCache : OFX::Host::PluginCache
+{
+	BridgePluginCache()
+	{
+		if( std::getenv( "OFXBRIDGE_NO_SYSTEM_DIRS" ) )
+		{
+			_pluginPath.clear();
+			_nonrecursePath.clear();
+		}
+	}
+};
+
 } // namespace
 
 std::vector< std::string > defaultSearchPaths()
 {
 	std::vector< std::string > paths;
+
+	// --no-system-dirs: nothing but what the caller adds. BridgePluginCache
+	// empties HostSupport's own search path under the same variable.
+	if( std::getenv( "OFXBRIDGE_NO_SYSTEM_DIRS" ) )
+		return paths;
 
 #if defined( __APPLE__ )
 	paths.push_back( "/Library/OFX/Plugins" );
@@ -138,7 +161,8 @@ std::vector< std::string > defaultSearchPaths()
 	return paths;
 }
 
-std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& searchPaths, std::string& log )
+std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& searchPaths, std::string& log,
+										   const std::string& context )
 {
 	std::vector< PluginDesc > results;
 	std::ostringstream logs;
@@ -146,7 +170,7 @@ std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& sea
 	static Host host;
 	static OFX::Host::ImageEffect::PluginCache imageEffectCache( host );
 
-	OFX::Host::PluginCache cache;
+	BridgePluginCache cache;
 	cache.registerAPICache( kOfxImageEffectPluginApi, 1, 1, &imageEffectCache );
 	for( const auto& p : searchPaths )
 	{
@@ -213,14 +237,16 @@ std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& sea
 			{
 				std::string ctx = rootProps.getStringProperty( kOfxImageEffectPropSupportedContexts, i );
 				desc.contexts.push_back( ctx );
-				if( ctx == kOfxImageEffectContextFilter )
+				if( ctx == context )
 					desc.supportsFilter = true;
 			}
 		}
 
 		if( !desc.supportsFilter )
 		{
-			desc.error = "plugin does not support the Filter context";
+			desc.error = context == kOfxImageEffectContextFilter
+							 ? std::string( "plugin does not support the Filter context" )
+							 : "plugin does not support the " + context + " context";
 			logs << "  SKIP " << desc.identifier << ": " << desc.error << "\n";
 			results.push_back( desc );
 			continue;
@@ -230,7 +256,7 @@ std::vector< PluginDesc > scanAndDescribe( const std::vector< std::string >& sea
 		OFX::Host::ImageEffect::Descriptor* ctxDesc = nullptr;
 		try
 		{
-			ctxDesc = plugin->getContext( kOfxImageEffectContextFilter );
+			ctxDesc = plugin->getContext( context );
 		}
 		catch( const std::exception& e )
 		{
@@ -375,7 +401,9 @@ std::string toManifestJson( const PluginDesc& p )
 std::unique_ptr< Effect > createEffect( Host& host,
 										const std::string& bundlePath,
 										const std::string& identifier,
-										std::string& error )
+										std::string& error,
+										const std::string& context,
+										std::string* chosenBundle )
 {
 	// The plugin cache owns the loaded binary and every descriptor hanging off
 	// it, so it must outlive the instance. One cache per bundle path is kept for
@@ -395,13 +423,13 @@ std::unique_ptr< Effect > createEffect( Host& host,
 	static auto& caches =
 		*new std::map< std::string, std::unique_ptr< OFX::Host::ImageEffect::PluginCache > >();
 	static auto& binaryCaches =
-		*new std::map< std::string, std::unique_ptr< OFX::Host::PluginCache > >();
+		*new std::map< std::string, std::unique_ptr< BridgePluginCache > >();
 
 	auto it = caches.find( bundlePath );
 	if( it == caches.end() )
 	{
 		auto ieCache = std::make_unique< OFX::Host::ImageEffect::PluginCache >( host );
-		auto cache   = std::make_unique< OFX::Host::PluginCache >();
+		auto cache   = std::make_unique< BridgePluginCache >();
 		cache->registerAPICache( kOfxImageEffectPluginApi, 1, 1, ieCache.get() );
 		// addFileToPath takes a directory to scan, not a bundle, so point it at the
 		// bundle's parent and rely on the identifier match below to pick ours out.
@@ -413,15 +441,25 @@ std::unique_ptr< Effect > createEffect( Host& host,
 		it = caches.emplace( bundlePath, std::move( ieCache ) ).first;
 	}
 
+	// The first identifier match used to win outright, so an installed copy
+	// scanned from /Library/OFX/Plugins could silently stand in for the dev
+	// build at `bundlePath`. Prefer the exact bundle; fall back to the first.
 	OFX::Host::ImageEffect::ImageEffectPlugin* found = nullptr;
 	for( auto* p : it->second->getPlugins() )
 	{
-		if( p->getIdentifier() == identifier )
+		if( p->getIdentifier() != identifier )
+			continue;
+		const bool exact = p->getBinary() && p->getBinary()->getBundlePath() == bundlePath;
+		if( exact )
 		{
 			found = p;
 			break;
 		}
+		if( found == nullptr )
+			found = p;
 	}
+	if( found != nullptr && chosenBundle != nullptr && found->getBinary() )
+		*chosenBundle = found->getBinary()->getBundlePath();
 
 	if( found == nullptr )
 	{
@@ -432,12 +470,13 @@ std::unique_ptr< Effect > createEffect( Host& host,
 	OFX::Host::ImageEffect::Instance* instance = nullptr;
 	try
 	{
-		if( found->getContext( kOfxImageEffectContextFilter ) == nullptr )
+		if( found->getContext( context ) == nullptr )
 		{
-			error = identifier + " does not support the Filter context";
+			error = context == kOfxImageEffectContextFilter ? identifier + " does not support the Filter context"
+															: identifier + " does not support the " + context + " context";
 			return nullptr;
 		}
-		instance = found->createInstance( kOfxImageEffectContextFilter, nullptr );
+		instance = found->createInstance( context, nullptr );
 	}
 	catch( const std::exception& e )
 	{

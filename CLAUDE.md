@@ -42,6 +42,10 @@ open "build/OFX Bridge.app"                                       # the app
 ./build/ofxprobe --dir build/test-plugins --render <id> --set k=v # CPU render
 ./build/ofxprobe --dir DIR --render <id> --edit preset=2          # a real user edit: fires instanceChanged (presets)
 ./build/ofxprobe --dir DIR --render <id> --size 640x360 --out out.bmp # input|output image
+# as a test host for OFX ports -- docs/06-ofxprobe.md:
+./build/ofxprobe --no-system-dirs --dir DIR --render <id> --in a.png --time 12 --out-only o.png
+./build/ofxprobe --no-system-dirs --dir DIR --render <id> --context transition --transition-ramp 0:24 --time 12
+./build/ofxprobe --no-system-dirs --dir DIR --render <id> --quirks fusion        # no frame rate anywhere
 ./build/ofxgen generate --dir build/test-plugins --out build/generated
 ./build/ofxgen generate --bundle <one.ofx.bundle> --out DIR       # just one
 ./build/ofxgen wrap-ffgl --bundle <FFGL.bundle> --out DIR # FFGL -> OFX, the other direction
