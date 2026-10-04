@@ -12,7 +12,9 @@
 # Conan-only packages (cimg, spdlog, opengl_system) that only its *other*
 # examples need.
 #
-# Output: build/test-plugins/<name>.ofx.bundle
+# Output: build/test-plugins/<name>.ofx.bundle -- universal (arm64 + x86_64),
+# like the bridge's own builds, so the corpus loads in either slice of a
+# universal host. ARCH="arm64" (or any space-separated list) builds just those.
 #
 set -euo pipefail
 
@@ -26,7 +28,11 @@ if [ ! -f "$OFX/include/ofxCore.h" ]; then
 	exit 1
 fi
 
-ARCH="${ARCH:-$(uname -m)}"
+ARCH="${ARCH:-arm64 x86_64}"
+ARCH_FLAGS=()
+for a in $ARCH; do
+	ARCH_FLAGS+=( -arch "$a" )
+done
 
 # The OpenFX C++ plugin Support library, which the examples are written against.
 #
@@ -41,12 +47,15 @@ LIB="$SUPPORT_BUILD/libOfxSupport.a"
 objs=()
 for src in "$OFX"/Support/Library/*.cpp; do
 	obj="$SUPPORT_BUILD/$(basename "$src" .cpp).o"
-	clang++ -std=c++17 -O2 -arch "$ARCH" -fPIC -Wno-deprecated-declarations -c \
+	clang++ -std=c++17 -O2 "${ARCH_FLAGS[@]}" -fPIC -Wno-deprecated-declarations -c \
 		-I "$OFX/include" -I "$OFX/Support/include" \
 		"$src" -o "$obj"
 	objs+=( "$obj" )
 done
-ar rcs "$LIB" "${objs[@]}"
+# libtool, not ar: with more than one -arch each object is a fat file, which ar
+# refuses ("is a fat file (use libtool(1) or lipo(1) and ar(1) on it)").
+rm -f "$LIB"
+libtool -static -o "$LIB" "${objs[@]}"
 
 [ -f "$LIB" ] || { echo "libOfxSupport.a was not produced" >&2; exit 1; }
 
@@ -66,7 +75,7 @@ for ex in Invert Basic ChoiceParams Custom OpenGL; do
 	bdl="$OUT/$name.ofx.bundle/Contents/MacOS"
 	mkdir -p "$bdl"
 
-	clang++ -std=c++17 -O2 -arch "$ARCH" -dynamiclib -fvisibility=hidden -Wno-deprecated-declarations \
+	clang++ -std=c++17 -O2 "${ARCH_FLAGS[@]}" -dynamiclib -fvisibility=hidden -Wno-deprecated-declarations \
 		-I "$OFX/include" -I "$OFX/Support/include" -I "$OFX/Examples/include" \
 		"$src" "$LIB" \
 		-framework OpenGL -framework CoreFoundation \
@@ -84,7 +93,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 	echo "==> building the Metal test plugin"
 	bdl="$OUT/metalgain.ofx.bundle/Contents/MacOS"
 	mkdir -p "$bdl"
-	clang++ -std=c++17 -ObjC++ -fobjc-arc -O2 -arch "$ARCH" -dynamiclib -fvisibility=hidden \
+	clang++ -std=c++17 -ObjC++ -fobjc-arc -O2 "${ARCH_FLAGS[@]}" -dynamiclib -fvisibility=hidden \
 		-I "$OFX/include" \
 		"$ROOT/testplugins/metal-gain/metalgain.mm" \
 		-framework Metal -framework Foundation \
@@ -99,7 +108,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
 	echo "==> building the OpenCL test plugin"
 	bdl="$OUT/openclgain.ofx.bundle/Contents/MacOS"
 	mkdir -p "$bdl"
-	clang++ -std=c++17 -O2 -arch "$ARCH" -dynamiclib -fvisibility=hidden \
+	clang++ -std=c++17 -O2 "${ARCH_FLAGS[@]}" -dynamiclib -fvisibility=hidden \
 		-DCL_SILENCE_DEPRECATION -I "$OFX/include" \
 		"$ROOT/testplugins/opencl-gain/openclgain.cpp" \
 		-framework OpenCL \

@@ -7,6 +7,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- `scripts/build-test-plugins.sh` builds the macOS test corpus universal
+  (arm64 + x86_64) in one run, like the bridge's own builds, so it loads in
+  either slice of a universal host. `ARCH=arm64` (or any list) builds just
+  those slices.
+
 ## [0.10.0] — 2026-10-04
 
 ### Added

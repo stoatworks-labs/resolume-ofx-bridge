@@ -27,7 +27,8 @@ except `ffglofxshell.ofx`, which is pinned to `build\`.
 A clean machine has no OFX plugins, even with Resolve installed. Build some:
 
 ```bash
-./scripts/build-test-plugins.sh          # -> build/test-plugins
+./scripts/build-test-plugins.sh          # -> build/test-plugins, universal
+ARCH=arm64 ./scripts/build-test-plugins.sh   # one slice only
 ```
 
 ```powershell
