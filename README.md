@@ -67,13 +67,14 @@ It cannot do what this build does — it never runs your plugin, so it cannot te
 browser writes, so one `xattr -dr` is required before the plugin will load. The page
 says all of that itself.
 
-**Fusion reports no frame rate; there, time-based controls assume 24 fps.** Resolve's
-Fusion page gives an OpenFX plugin no frame rate at all, and a wrapped FFGL or After
-Effects plugin failed every render there. The shell now falls back to 24, Resolve's
-default timeline rate, so in Fusion the guest's clock runs as if the composition were
-24 fps; a host that reports a rate gets its own. Every wrapped bundle carries its own
-copy of the shell, so a plugin wrapped before this fix has to be wrapped again to
-get it.
+**Resolve's Fusion page reports the frame rate on the effect but not on its clips.**
+The shell used to read the output clip's rate, which Fusion leaves out, so a wrapped
+FFGL or After Effects plugin failed every render there. It now asks the output clip,
+the source clip and then the effect, so in Fusion the guest's clock runs at the
+timeline's own rate (checked at 24 and 25 fps); it assumes 24 fps, Resolve's default
+timeline rate, only where a host reports no rate at all. Every wrapped bundle carries
+its own copy of the shell, so a plugin wrapped before this fix has to be wrapped
+again to get it.
 
 
 ## What it looks like
