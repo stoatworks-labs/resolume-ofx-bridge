@@ -29,14 +29,14 @@ a real Resolume folder to film it.*
 
 ## Download
 
-**[v0.9.3](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.9.3)** — prebuilt for macOS and Windows. Pick your platform:
+**[v0.10.0](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/tag/v0.10.0)** — prebuilt for macOS and Windows. Pick your platform:
 
 <details>
 <summary><b>macOS</b> — Universal (Apple Silicon + Intel)</summary>
 
 | Build | Download | Size |
 | --- | --- | --- |
-| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-macos-universal.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-macos-universal.zip) | 5.9 MB |
+| Universal (Apple Silicon + Intel) · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-macos-universal.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-macos-universal.zip) | 6.1 MB |
 
 </details>
 
@@ -45,7 +45,7 @@ a real Resolume folder to film it.*
 
 | Build | Download | Size |
 | --- | --- | --- |
-| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-windows-x86_64.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-windows-x86_64.zip) | 3.0 MB |
+| x64 · .zip archive (OpenFX — Resolve, Vegas, Nuke) | [`resolume-ofx-bridge-windows-x86_64.zip`](https://github.com/stoatworks-labs/resolume-ofx-bridge/releases/latest/download/resolume-ofx-bridge-windows-x86_64.zip) | 3.1 MB |
 
 </details>
 
