@@ -317,6 +317,46 @@ bool isNumericType( int type )
 	}
 }
 
+/// The frame rate when the host reports none: 24, Resolve's default timeline
+/// rate. Resolve's Fusion page reports no frame rate anywhere.
+constexpr double kFallbackFrameRate = 24.0;
+
+/// OFX time is in frames, and the guest is handed seconds. This is the first
+/// positive, finite frame rate the host gives -- the output clip's, the source
+/// clip's, the effect's -- else kFallbackFrameRate. Each read is its own try:
+/// Resolve's Fusion page gives kOfxImageEffectPropFrameRate on neither the
+/// effect nor any clip, the Support library throws on a property the host
+/// lacks, and a throw out of render fails the render -- in Fusion, a
+/// composition that "could not be processed successfully".
+double framesPerSecond( const OFX::ImageEffect& effect, const OFX::Clip* output, const OFX::Clip* source )
+{
+	const auto usable = []( double rate ) { return std::isfinite( rate ) && rate > 0.0; };
+	for( const OFX::Clip* clip : { output, source } )
+	{
+		if( clip == nullptr )
+			continue;
+		try
+		{
+			const double rate = clip->getFrameRate();
+			if( usable( rate ) )
+				return rate;
+		}
+		catch( ... )
+		{
+		}
+	}
+	try
+	{
+		const double rate = effect.getFrameRate();
+		if( usable( rate ) )
+			return rate;
+	}
+	catch( ... )
+	{
+	}
+	return kFallbackFrameRate;
+}
+
 /// One GL render at a time, process-wide. Contexts are per-instance, but GL
 /// on macOS is not reliably thread-safe across contexts, and an NLE will
 /// happily render two instances concurrently.
@@ -419,9 +459,7 @@ public:
 			guestOpen = true;
 		}
 
-		double fps = dstClip->getFrameRate();
-		if( !( fps > 0.0 ) )
-			fps = 24.0;
+		const double fps = framesPerSecond( *this, dstClip, srcClip );
 
 		// FFGL is a premultiplied world (Resolume's convention); AE hands its
 		// effects straight colour. Convert to whichever the guest is owed.
@@ -717,6 +755,7 @@ void FfglOfxShellFactory::describe( OFX::ImageEffectDescriptor& desc )
 		( "An FFGL plugin, carried into this host by the Stoatworks bridge. "
 		  "The effect renders through its own OpenGL context at 8 bits per "
 		  "channel, exactly as it would inside Resolume.\n\n"
+		  "Fusion reports no frame rate; there, time-based controls assume 24 fps.\n\n"
 		  "https://stoatworks-labs.com"
 		  + ( m.loaded ? std::string() : "\n\nMANIFEST ERROR: " + m.error ) )
 			.c_str() );

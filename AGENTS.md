@@ -81,6 +81,21 @@ hand-written OFX port on the probe's test frame.
   memmoves into garbage and dies inside its own `getParamGroup`.
 - FFGL strings are bounded, not terminated: 16-char names, 4-char ids.
 - Repeated `--bundle` flags: the generate path keeps one, wrap-ffgl takes all.
+- **Resolve's Fusion page reports no frame rate, and a missing property throws.**
+  Found 2026-10-03 on the fleet's OFX ports in Resolve Studio 21.1: Fusion gives
+  `kOfxImageEffectPropFrameRate` on neither the effect nor any clip, and reports
+  every clip's frame range as [0, 0]. The OFX Support library turns a missing
+  property into `PropertyUnknownToHost`, and out of `render` that is
+  `kOfxStatErrMissingHostFeature`. `ffglofxshell` read `dstClip->getFrameRate()`
+  unguarded to turn OFX frames into the guest's seconds, so every wrapped FFGL and
+  AE plugin failed every frame there. `framesPerSecond()` now asks the output clip,
+  the source clip and the effect, each in its own `try`, else 24 (Resolve's default
+  timeline rate). Checked with a scratch `ofxprobe` whose `--quirks fusion`
+  withholds the same properties: the old shell fails under it; the new one renders
+  and hands the guest `setTime( 1.25 )` at frame 30, exactly as a 24 fps host does.
+  A wrapped FFGL guest cannot prove it byte for byte: run frame by frame it is not
+  deterministic, and rendered alone it has no elapsed time to show a rate with. A
+  wrapped bundle carries its own copy of the shell, so only a re-wrap picks this up.
 
 ## Layout
 
