@@ -310,6 +310,39 @@ them announced what was actually wrong.
 - **`SetOptionParamInfo()` does not set a range.** Without a following
   `SetParamRange()`, a choice param reports 0..1 no matter how many options.
 
+### ☠️ One process, many copies: export only the entry points
+
+Both shells -- `ofxwrapper` (OFX into Resolume) and `ffglofxshell` (FFGL or AE
+into an OFX host) -- are copied once per wrapped plugin, and a host loads every
+copy into one process. Identical binaries define identical weak symbols. In a
+host that loads plugins RTLD_GLOBAL, dyld binds each later copy's weak
+references to the FIRST copy's definitions, so the copies stop being separate:
+
+- `ffglofxshell` exported the OFX Support library's
+  `FactoryMainEntryHelper<FfglOfxShellFactory>::mainEntry` and `::_uid`. Every
+  later copy's plugin ran the first copy's `mainEntry` against one shared `_uid`.
+  DaVinci Resolve loads plugins that way: two wrapped bundles on its plugin path
+  aborted it at plugin scan (`std::terminate` in `mainEntryStr`, 2026-10-04,
+  v0.9.3's shell and later), while either alone loaded fine.
+- `ofxwrapper` exported the FFGL SDK's `PluginFactory<OfxFFGLPlugin>`. With a
+  wrapped Gain loaded RTLD_GLOBAL first, a wrapped Invert rendered Gain's output
+  (`ffgltest --expect-centre` failed, 128 not 127). Whether Resolume loads
+  plugins globally has not been tested; the hazard is real either way.
+
+So each binary exports exactly the symbols a host looks up, enforced at link time
+in CMakeLists.txt: `_OfxGetPlugin` and `_OfxGetNumberOfPlugins` for the shell
+(an `-exported_symbol` list on macOS, `cmake/ofxshell.map` on Linux), and
+`_plugMain` and `_SetLogCallback` for the wrapper. On Windows a DLL exports only
+what is `dllexport`ed already. The macOS release job checks both export lists. Do
+not loosen them for a new entry point without adding it to the list.
+
+**Every test host here loads RTLD_LOCAL** -- `ofxprobe`'s HostSupport, `ofxgen`,
+`ffgltest`, the FFGL guest loader -- which is why none of them ever showed this.
+To reproduce it, load two copies RTLD_GLOBAL and ask where the second plugin's
+`mainEntry` lives (`dladdr`), or run with `DYLD_PRINT_BINDINGS=1` and look for a
+weak-def lookup that resolves into the other copy. A bundle wrapped or generated
+before this fix keeps the old binary until it is wrapped again.
+
 ## Host identification
 
 The host reports itself honestly as `com.stoatworks.ofxbridge`. Some commercial

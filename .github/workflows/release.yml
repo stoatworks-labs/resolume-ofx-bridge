@@ -70,6 +70,19 @@ jobs:
       - name: Build the shell
         run: cmake --build build --config Release --target ffglofxshell
 
+      - name: Verify the shell exports only the OFX entry points (Linux)
+        # See the macOS job's export check and AGENTS.md, "One process, many
+        # copies"; cmake/ofxshell.map is what enforces it here.
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          got=$(nm -D --defined-only build/ffglofxshell.ofx | awk '{print $NF}' | LC_ALL=C sort | tr '\n' ' ')
+          echo "exports: $got"
+          if [ "$got" != "OfxGetNumberOfPlugins OfxGetPlugin " ]; then
+            echo "::error::ffglofxshell exports '$got'"
+            exit 1
+          fi
+
       - name: Collect
         shell: bash
         run: |
@@ -259,6 +272,27 @@ jobs:
               *) echo "::error::$f is missing the x86_64 slice"; exit 1 ;;
             esac
           done
+
+      - name: Verify the per-plugin binaries export only their entry points
+        # Each is copied once per wrapped plugin and a host loads every copy into
+        # one process; anything else exported is shared between the copies in a
+        # host that loads plugins RTLD_GLOBAL (Resolve does). AGENTS.md, "One
+        # process, many copies".
+        run: |
+          set -euo pipefail
+          check() {
+            local f=$1 want=$2 got arch
+            for arch in arm64 x86_64; do
+              got=$(nm -gU -arch "$arch" "$f" | awk '{print $NF}' | LC_ALL=C sort | tr '\n' ' ')
+              echo "$f ($arch): $got"
+              if [ "$got" != "$want" ]; then
+                echo "::error::$f ($arch) exports '$got', expected '$want'"
+                exit 1
+              fi
+            done
+          }
+          check build/ffglofxshell.ofx "_OfxGetNumberOfPlugins _OfxGetPlugin "
+          check build/ofxwrapper.bundle/Contents/MacOS/ofxwrapper "_SetLogCallback _plugMain "
 
       - name: Self-test against real OFX plugins
         # Builds a corpus from the OpenFX examples and runs the bridge end to end,

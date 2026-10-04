@@ -148,8 +148,17 @@ if( APPLE )
 		MACOSX_BUNDLE_GUI_IDENTIFIER "com.stoatworks.ffgl.ofxwrapper"
 		MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
 	)
-	# FFGL hosts resolve plugMain by symbol name, so keep default visibility.
 	target_link_libraries( ofxwrapper PRIVATE "-framework OpenGL" )
+	# One copy of this binary per wrapped OFX plugin, all in one host process.
+	# An FFGL host finds plugMain (and SetLogCallback) by name, and those are
+	# all it exports. Anything else exported -- a weak template such as the
+	# SDK's PluginFactory<OfxFFGLPlugin> -- is one definition for every copy
+	# in a host that loads plugins RTLD_GLOBAL: each later copy binds to the
+	# first one's, and every wrapped plugin instantiates the first one's
+	# effect. See AGENTS.md, "One process, many copies".
+	target_link_options( ofxwrapper PRIVATE
+		"LINKER:-exported_symbol,_plugMain"
+		"LINKER:-exported_symbol,_SetLogCallback" )
 endif()
 
 # ---------------------------------------------------------------------------
@@ -333,6 +342,22 @@ if( TRUE )
 	else()
 		# Linux still needs the JSON reader the manifest path uses.
 		target_link_libraries( ffglofxshell PRIVATE bridgejson )
+	endif()
+	# The generator makes one copy of this binary per wrapped plugin, and a host
+	# loads all of them into one process. Resolve loads plugins RTLD_GLOBAL, so
+	# any weak definition the first copy exports is the one every later copy
+	# binds to -- the OFX Support library's per-plugin template statics among
+	# them -- and the second plugin runs on the first one's identity: two
+	# wrapped bundles aborted Resolve at plugin scan. So the shell exports the
+	# two OFX entry points and nothing else. Windows exports only what is
+	# dllexport'ed already. See AGENTS.md, "One process, many copies".
+	if( APPLE )
+		target_link_options( ffglofxshell PRIVATE
+			"LINKER:-exported_symbol,_OfxGetPlugin"
+			"LINKER:-exported_symbol,_OfxGetNumberOfPlugins" )
+	elseif( NOT WIN32 )
+		target_link_options( ffglofxshell PRIVATE
+			"LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/ofxshell.map" )
 	endif()
 	if( WIN32 )
 		# Keep MSVC's .exp/.lib away from the other targets' output directory.

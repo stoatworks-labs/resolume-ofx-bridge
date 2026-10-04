@@ -1,0 +1,10 @@
+/* ffglofxshell's exports on Linux: the two entry points an OFX host looks up,
+   and nothing else. See the ffglofxshell block in CMakeLists.txt and AGENTS.md,
+   "One process, many copies". */
+{
+	global:
+		OfxGetPlugin;
+		OfxGetNumberOfPlugins;
+	local:
+		*;
+};

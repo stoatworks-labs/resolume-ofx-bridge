@@ -265,6 +265,13 @@ ranges survive intact.
   worked around here.
 - **Parametric (curve) parameters are declined** — FFGL has no equivalent and any
   flattening would misrepresent the plugin's UI.
+- **Several wrapped plugins in one host need bundles made after v0.9.3.** Every
+  wrapped plugin carries its own copy of the bridge's binary, and until this fix
+  the copies exported symbols a host could share between them. With two FFGL
+  plugins wrapped for OpenFX on its plugin path, DaVinci Resolve aborted at
+  startup. Bundles generated for Resolume had the same flaw: in a host that loads
+  plugins into one global namespace, every one of them would run the first one's
+  effect. Wrap or generate again to pick up the fix.
 
 ## Documentation
 
