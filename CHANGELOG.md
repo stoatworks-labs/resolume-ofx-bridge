@@ -26,6 +26,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   scanned bundle carries the identifier, instead of the first found, so an
   installed copy can no longer stand in for it.
 
+### Fixed
+
+- A wrapped FFGL or AE plugin renders in Resolve's Fusion page. Fusion reports
+  the frame rate on the effect but not on its clips, and the shell read the
+  output clip's unguarded, so every frame failed. It now asks the output clip,
+  the source clip and the effect in turn, and assumes 24 fps if none answers.
+- A wrapped FFGL source animates in Fusion. The shell now declares its output
+  frame-varying; without that, Fusion rendered a source once and repeated it.
+- Several wrapped plugins can run in one host. Resolve loads plugins into one
+  symbol namespace and aborted at plugin scan with two wrapped bundles on its
+  path, because each copy of the shell shared its internals with the first.
+  The shell and the Resolume wrapper now export only their entry points.
+
+A bundle carries its own copy of the shell or wrapper, so these fixes reach a
+plugin only when it is wrapped or generated again.
+
 ## [0.9.3] — 2026-09-04
 
 ### Changed
