@@ -1064,7 +1064,9 @@ struct Options
 	std::string renderFor;
 	std::string context = kOfxImageEffectContextFilter;
 	int temporal        = -1;// -1 = auto: on when any sequence is used
-	double frameRate    = 25.0;
+	// 60, what ofxprobe and the bridge have always reported: fleet checks
+	// compare a probe render against an FFGL render on a 60 fps clock.
+	double frameRate    = 60.0;
 	std::string depth   = "byte";
 	bool haveRange      = false;
 	double rangeFirst = 0.0, rangeLast = 0.0;

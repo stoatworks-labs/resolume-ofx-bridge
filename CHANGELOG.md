@@ -19,9 +19,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- `ofxprobe` reports 25 fps by default (it was 60), its renders print the
-  instance, timeline, output mean and hash, and a failed render names its OFX
-  status. Every original flag otherwise behaves as before.
+- `ofxprobe` renders print the instance, timeline, output mean and hash, and a
+  failed render names its OFX status. Every original flag otherwise behaves as
+  before, and the reported frame rate is still 60 by default.
 - `createEffect` prefers the bundle at the requested path when more than one
   scanned bundle carries the identifier, instead of the first found, so an
   installed copy can no longer stand in for it.

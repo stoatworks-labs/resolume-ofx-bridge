@@ -60,7 +60,7 @@ Flags marked "per render" can also go on a `--batch` line.
 | `--quiet` | Hides the scan log in listing mode. |
 | `--render ID` | Creates an instance and renders it. Everything below applies to this mode. |
 | `--context C` | `filter` (default), `transition`, `generator` or `general`. The host advertises Filter plus C, and describes and instantiates the plugin in C. |
-| `--frame-rate R` | The frame rate the effect and every clip report. Default **25**. (The wrapper and the app report 60.) |
+| `--frame-rate R` | The frame rate the effect and every clip report. Default **60**, what the bridge has always reported -- fleet checks compare a probe render with an FFGL render on a 60 fps clock, so keep it. |
 | `--depth byte\|float` | Image depth. Default `byte`. See [Pixels](#pixels). |
 | `--temporal 0\|1` | The host's `kOfxImageEffectPropTemporalClipAccess`. Default 1 if any `--seq*` is used, else 0, as in the bridge. Fetches at any time are answered either way. |
 | `--range FIRST:LAST` | Overrides the timeline. See [Time](#time-sequences-and-temporal-access). |
@@ -177,13 +177,13 @@ There is no source clip; only `Output` is rendered. Give `--size` (default
 ```
   host: contexts Filter Transition, temporal clip access 1, system plugin dirs NOT scanned
   instance from /…/Foo.ofx.bundle (Transition context)      <- the bundle actually instantiated
-  timeline [0, 11] at 25 fps (effect duration 12 frames)
+  timeline [0, 11] at 60 fps (effect duration 12 frames)
   clip SourceFrom <- sequence a/%04d.ppm, frames 0..11
   key Transition: 0 at frame 0 -> 1 at frame 10 (linear, held outside)
   press poke at t=5 -> kOfxStatReplyDefault
   plugin set pokes = 1                                       <- params the plugin wrote back
 rendered 160x90 through com.example.foo
-  time 5  context Transition  depth 8-bit RGBA  frame rate 25  render 0.398 ms
+  time 5  context Transition  depth 8-bit RGBA  frame rate 60  render 0.398 ms
   out [0,0] / out [centre]
   out mean       RGBA r g b a
   out hash       fnv1a64 <16 hex> (8-bit RGBA)   <- compare renders by this
@@ -266,15 +266,15 @@ Every original flag behaves as before. Checked against the probe built from the
 previous main, with only the original flags: the corpus from
 `scripts/build-test-plugins.sh` and four fleet filters give byte-identical
 `--out` images (two fleet generators are refused identically in the default
-Filter context), and every line the old probe printed is still printed --
+Filter context), Gate's FFGL-agreement check -- which renders on the probe's
+60 fps clock and is the one that caught a changed default -- matches the old
+probe to the pixel, and every line the old probe printed is still printed --
 renders gain informational lines (host, instance, timeline, mean, hash, time)
 and a failed render now names its OFX status. Listing, `--json` and
 `--manifest` are identical.
 
 What did change for the same flags:
 
-- The reported frame rate defaults to 25 (it was 60, which the wrapper and the
-  app still report).
 - Clips report the depth they are actually delivered.
 - Inputs are connected during the first clip-preferences pass.
 - The instance comes from the exact bundle that was described.
