@@ -79,5 +79,5 @@ no runner has a GL 4.1 core driver on Windows, where `ffgltest` exits 3 and CI
 skips with a notice.
 
 ```bash
-git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z   # latest released: v0.8.1
+git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z   # latest released: v0.10.0
 ```

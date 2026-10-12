@@ -20,9 +20,10 @@ JSON manifest that it reads when the host loads it.
 > driver, and neither the machine here nor a hosted runner is one. That's a narrower gap than
 > "untested", but it's a real one.
 >
-> **Linux has still never been compiled.** **Metal and OpenCL are macOS only**: a Windows build
-> advertises neither, so plugins wanting them are declined when they introduce themselves rather
-> than failing part-way through a frame. The **CUDA path is written from the specification and
+> **Linux only gets the FFGL → OpenFX shell**, for the browser wrapper, and nothing has ever run
+> there. **Metal and OpenCL are macOS only**: a Windows build advertises neither, so plugins
+> wanting them are declined when they introduce themselves rather than failing part-way through a
+> frame. The **CUDA path is written from the specification and
 > has never been compiled or run**. And **licensed commercial plugins will mostly refuse to
 > load** (see [What won't work](#what-wont-work)).
 
@@ -192,7 +193,7 @@ named in the log rather than guessed around.
 | **Effect renders but is slow** | It is on the CPU path — a full GPU round trip per frame. Check whether it advertises Metal. |
 | **OpenGL-render plugin draws nothing** | It probably uses immediate-mode GL, which a core profile forbids. |
 | **A Metal or OpenCL plugin is declined on Windows** | Expected — both interops are macOS. The plugin is turned down at describe time rather than failing mid-frame. |
-| **Linux build** | Never compiled. macOS and Windows x64 only. |
+| **Linux build** | The tools are macOS and Windows x64 only. Linux gets just the FFGL → OpenFX shell the browser wrapper serves, and it's never been run. |
 
 ---
 

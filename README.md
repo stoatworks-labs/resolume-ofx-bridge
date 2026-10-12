@@ -65,9 +65,10 @@ host loads them, assembling a wrapped plugin is just a file copy, so a web page 
 pick the FFGL or After Effects bundle, pick an output folder, done.
 
 It can't do everything this build does. It never runs your plugin, so it can't tell you
-*why* one won't wrap; it's Chrome/Edge and macOS only; and macOS quarantines anything a
-browser writes, so you'll need one `xattr -dr` before the plugin will load. The page tells
-you all that as well.
+*why* one won't wrap; it's Chrome or Edge on a desktop only; the Windows and Linux shells
+it hands out have never rendered a frame; and macOS quarantines anything a browser writes,
+so you'll need one `xattr -dr` before the plugin will load. The page tells you all that as
+well.
 
 **Resolve's Fusion page reports the frame rate on the effect but not on its clips.**
 The shell used to read the output clip's rate, which Fusion leaves out, so a wrapped

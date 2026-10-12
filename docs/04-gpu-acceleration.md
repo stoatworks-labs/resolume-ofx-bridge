@@ -258,5 +258,6 @@ The missing piece is GL↔CUDA interop — `cudaGraphicsGLRegisterBuffer` and
 That is deliberately not written blind, because there would be no way to tell
 whether it was right.
 
-**Prerequisite:** CUDA only matters on Windows and Linux, and this project has
-never been compiled for either. Platform support comes first.
+**Prerequisite:** CUDA only matters on Windows and Linux. Windows x64 has shipped
+since v0.9.1 and Linux builds only the FFGL->OFX shell, so what it waits on now is
+an NVIDIA machine to compile and run it on.
