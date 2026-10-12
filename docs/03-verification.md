@@ -245,10 +245,12 @@ implementation, and it now demonstrably behaves the same under MSVC.
 
 ## What is *not* verified
 
-- **Nothing has run inside Resolume.** Every GL test uses our own offscreen
-  context. Resolume's real texture sizes (it may hand over a padded hardware
+- **Resolume itself has only been tried by hand, on a Mac.** Generated bundles
+  were run inside Resolume on real content (the author's report, 2026-08-02, at
+  v0.5.1); nothing has run there on Windows. Every GL test uses our own offscreen
+  context, so Resolume's real texture sizes (it may hand over a padded hardware
   texture larger than the image), its premultiplication behaviour, its resize
-  behaviour and its parameter UI rendering are all unconfirmed.
+  behaviour and its parameter UI rendering are all unconfirmed by any test.
 - **Premultiplication is asserted, not measured.** The host tells plugins the
   input is premultiplied RGBA because that is what Resolume is documented to use.
   Nothing has checked it against real Resolume output.

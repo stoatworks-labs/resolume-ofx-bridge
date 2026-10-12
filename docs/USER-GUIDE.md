@@ -10,7 +10,8 @@ JSON manifest that it reads when the host loads it.
 > **Before you rely on this:** it's out at v0.10.0 as a working prototype. The host, the
 > parameter mapping and the pixel path are checked against real OFX plugins by automated
 > harnesses, including a headless OpenGL test that drives a generated bundle the way a host
-> would, and generated bundles **have since been run inside Resolume itself on real content**.
+> would, and generated bundles **have since been run inside Resolume itself on real content**,
+> on a Mac with v0.5.1 in August 2026.
 >
 > There's now a **Windows x64 release as well as the macOS universal build**, and Windows runs
 > the same self-test: it finds the same plugins, declines the same ones, and produces the same

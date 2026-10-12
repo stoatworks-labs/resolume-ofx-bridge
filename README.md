@@ -5,8 +5,9 @@
 > mapping and pixel path are checked against real OFX plugins by automated
 > harnesses in this repo, including a headless OpenGL test that drives a
 > generated plugin the way a host would (see [docs/03-verification.md](docs/03-verification.md)).
-> It **hasn't** been loaded into Resolume itself, and it's never been used on a
-> live show. Treat it as a working prototype rather than production tooling.
+> I've run generated bundles inside Resolume on a Mac, on real content (v0.5.1,
+> August 2026), but it's never been used on a live show. Treat it as a working
+> prototype rather than production tooling.
 
 Run **OpenFX plugins** (the format DaVinci Resolve uses) inside **Resolume
 Arena/Avenue** as native FFGL effects.
