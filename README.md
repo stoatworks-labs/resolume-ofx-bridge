@@ -2,22 +2,23 @@
 
 > **AI-assisted project.** This codebase was created with [Claude](https://claude.com/claude-code)
 > (Anthropic), directed and reviewed by a human author. The OFX host, parameter
-> mapping and pixel path are verified against real OFX plugins by automated
-> harnesses in this repo — including a headless OpenGL test that drives a
-> generated plugin exactly as a host would (see [docs/03-verification.md](docs/03-verification.md)).
-> It has **not** been loaded into Resolume itself, and has never been used on a
-> live show. Treat it as a working prototype, not production tooling.
+> mapping and pixel path are checked against real OFX plugins by automated
+> harnesses in this repo, including a headless OpenGL test that drives a
+> generated plugin the way a host would (see [docs/03-verification.md](docs/03-verification.md)).
+> It **hasn't** been loaded into Resolume itself, and it's never been used on a
+> live show. Treat it as a working prototype rather than production tooling.
 
-Run **OpenFX plugins** — the format DaVinci Resolve uses — inside **Resolume
+Run **OpenFX plugins** (the format DaVinci Resolve uses) inside **Resolume
 Arena/Avenue** as native FFGL effects.
 
-A standalone generator scans your OFX plugin folders and emits one FFGL bundle
-per plugin, each exposing that plugin's real parameters, with their real names,
-units, ranges and groupings, in Resolume's own UI.
+A standalone generator scans your OFX plugin folders and makes one FFGL bundle
+per plugin, each showing that plugin's real parameters, with their real names,
+units, ranges and groupings, in Resolume's own UI. No fixed pool of anonymous
+0–1 sliders.
 
-[![Watch it running — 52 seconds](docs/video-thumb-anyany.png)](https://www.youtube.com/watch?v=SbQ-FTbwG1s)
+[![Watch it running (52 seconds)](docs/video-thumb-anyany.png)](https://www.youtube.com/watch?v=SbQ-FTbwG1s)
 
-*Any plugin format, any host — every command in that video is really executed.*
+*Any plugin format, any host. Every command in that video really ran.*
 The [original 33-second video](https://www.youtube.com/watch?v=-ruvWTiDpa4) shows the
 generator app doing the OpenFX → Resolume direction.
 
@@ -57,22 +58,22 @@ macOS builds are signed and notarised and open normally. The Windows builds are 
 
 ## Or wrap a plugin in your browser
 
-[**ofx-bridge.stoatworks-labs.com**](https://ofx-bridge.stoatworks-labs.com) — nothing to
-install, nothing uploaded. Because the shells describe their own guest when the host
-loads them, assembling a wrapped plugin is a pure file copy, so a page can do it: pick
-the FFGL or After Effects bundle, pick an output folder, done.
+[**ofx-bridge.stoatworks-labs.com**](https://ofx-bridge.stoatworks-labs.com): nothing to
+install, and nothing gets uploaded. Because the shells describe their own guest when the
+host loads them, assembling a wrapped plugin is just a file copy, so a web page can do it:
+pick the FFGL or After Effects bundle, pick an output folder, done.
 
-It cannot do what this build does — it never runs your plugin, so it cannot tell you
-*why* one won't wrap, it is Chrome/Edge and macOS only, and macOS quarantines anything a
-browser writes, so one `xattr -dr` is required before the plugin will load. The page
-says all of that itself.
+It can't do everything this build does. It never runs your plugin, so it can't tell you
+*why* one won't wrap; it's Chrome/Edge and macOS only; and macOS quarantines anything a
+browser writes, so you'll need one `xattr -dr` before the plugin will load. The page tells
+you all that as well.
 
 **Resolve's Fusion page reports the frame rate on the effect but not on its clips.**
 The shell used to read the output clip's rate, which Fusion leaves out, so a wrapped
 FFGL or After Effects plugin failed every render there. It now asks the output clip,
 the source clip and then the effect, so in Fusion the guest's clock runs at the
-timeline's own rate (checked at 24 and 25 fps); it assumes 24 fps, Resolve's default
-timeline rate, only where a host reports no rate at all. Every wrapped bundle carries
+timeline's own rate (checked at 24 and 25 fps); it only assumes 24 fps, Resolve's
+default timeline rate, where a host reports no rate at all. Every wrapped bundle carries
 its own copy of the shell, so a plugin wrapped before this fix has to be wrapped
 again to get it.
 
@@ -80,7 +81,7 @@ again to get it.
 ## What it looks like
 
 Real output from the OpenFX `Invert` example, rendered through the generated FFGL
-plugin in an OpenGL context — before on the left, after on the right:
+plugin in an OpenGL context, before on the left and after on the right:
 
 ![Invert, before and after](docs/demo-invert.png)
 
@@ -90,12 +91,12 @@ do:
 
 ![Gain at 1.8, before and after](docs/demo-gain.png)
 
-And the same again from a plugin rendering entirely on the **GPU with Metal** —
-pixel-equivalent to the CPU result, at 5.4× the speed:
+And the same again from a plugin rendering entirely on the **GPU with Metal**,
+pixel-equivalent to the CPU result at 5.4× the speed:
 
 ![Metal gain at 1.8, before and after](docs/demo-metal.png)
 
-Neither image is a mock-up; both are written by
+Neither image is a mock-up: both are written by
 [`ffgltest --demo`](docs/03-verification.md) straight out of the plugin's
 framebuffer.
 
@@ -107,15 +108,15 @@ installed plugins. FFGL can't express that.
 FFGL 2.2 *can* change a parameter's display name, visibility and dropdown
 elements at runtime. But its header explicitly lists range and default-value
 change events as **not supported**, and a parameter's *type* is fixed when the
-plugin loads. A dropdown wrapper would therefore have to declare a fixed pool of
-pre-typed 0–1 sliders and rename them — every parameter losing its real units,
-and any plugin with more parameters of a type than the pool has slots being
-unrepresentable.
+plugin loads. So a dropdown wrapper would have to declare a fixed pool of
+pre-typed 0–1 sliders and rename them, with every parameter losing its real units,
+and any plugin with more parameters of a type than the pool has slots couldn't be
+shown at all.
 
-Generating one bundle per plugin keeps each parameter exactly as its author
+Generating one bundle per plugin keeps each parameter just as its author
 declared it. See [docs/01-architecture.md](docs/01-architecture.md).
 
-**You do not need a compiler.** Each generated bundle is a copy of one prebuilt
+**You don't need a compiler.** Each generated bundle is a copy of one prebuilt
 binary plus a JSON manifest, which the plugin reads when the host loads it.
 
 ## Install
@@ -123,18 +124,18 @@ binary plus a JSON manifest, which the plugin reads when the host loads it.
 Download the release, unzip, and open **OFX Bridge.app**: choose a folder of OFX
 plugins (or a single `.ofx.bundle`), choose where to install, press Start.
 
-*On Windows there is no app — `ofxgen.exe` does everything it does, and the
+*On Windows there's no app. `ofxgen.exe` does everything it does, and the
 command-line section below is the whole story.*
 
 ![The OFX Bridge window after a run](docs/demo-ui.png)
 
 The **Add to** buttons fill the destination in for whichever Resolume products
 are installed. Only Arena and Avenue are known to scan an `Extra Effects`
-folder — buttons appear for Alley and Wire because that is where they would look
-if support arrives, and clicking one says as much in the log.
+folder. Buttons appear for Alley and Wire because that's where they'd look if
+support arrives, and clicking one says as much in the log.
 
-The app clears macOS quarantine from what it writes, which matters because a
-quarantined plugin makes Resolume skip it silently rather than prompt.
+The app clears macOS quarantine from what it writes, which matters because
+Resolume silently skips a quarantined plugin rather than asking.
 
 ### Or from the command line
 
@@ -155,7 +156,7 @@ scan somewhere else:
 Then rescan effects in Resolume.
 
 Both the app and the CLI strip `com.apple.quarantine` from what they write. If
-plugins still fail to appear after being copied around by something else, clear
+plugins still don't appear after something else has copied them around, clear
 it by hand:
 
 ```bash
@@ -172,7 +173,7 @@ cmake -S . -B build && cmake --build build -j8
 
 ## Trying it without any OFX plugins
 
-There is probably no OFX plugin on your machine even if you have Resolve —
+There's probably no OFX plugin on your machine even if you have Resolve.
 Resolve compiles its own ResolveFX into the application rather than installing
 loadable bundles, so `/Library/OFX/Plugins` is usually empty. Build a test corpus
 from the OpenFX examples:
@@ -220,7 +221,7 @@ parameters: 6
 ```
 
 Eight OFX parameters become six FFGL ones: the group and page carry no value of
-their own, the group instead becomes a heading on its children, and the 0–100
+their own, the group becomes a heading on its children instead, and the 0–100
 ranges survive intact.
 
 ## Tools
@@ -236,11 +237,11 @@ ranges survive intact.
 
 ## Compatibility and limits
 
-- **Only the Filter context** is hosted, since that is what maps onto an effect
+- **Only the Filter context** is hosted, since that's what maps onto an effect
   slot in a Resolume clip. Generator, Transition and General-only plugins are
   reported and skipped.
 - **GPU rendering via Metal or OpenGL; CPU otherwise.** A plugin advertising OFX
-  *Metal render* — what Resolve-targeted plugins on macOS use — renders on the
+  *Metal render* (what Resolve-targeted plugins on macOS use) renders on the
   GPU with no CPU round trip, **5.4× faster at 1080p** and 3.6× at 4K. OFX
   *OpenGL render* is supported too. Everything else takes the CPU path, a full
   GPU → CPU → GPU trip per frame. See
@@ -250,20 +251,20 @@ ranges survive intact.
 - **The Metal and OpenCL interops are macOS.** A Windows build advertises
   neither, so plugins offering them are declined when they describe themselves
   rather than failing part-way through a frame; OFX OpenGL render and the CPU
-  path work there as they do on macOS. What is verified on which platform is in
+  path work there as they do on macOS. What's verified on which platform is in
   [docs/03-verification.md](docs/03-verification.md).
-- **CUDA is written but has never been compiled or run** — it needs an NVIDIA GPU,
-  which macOS has not supported since 10.13. The host does not advertise CUDA
+- **CUDA is written but has never been compiled or run**: it needs an NVIDIA GPU,
+  which macOS hasn't supported since 10.13. The host doesn't advertise CUDA
   support, so such plugins are declined cleanly rather than failing mid-render.
   See [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md).
 - **OpenGL-render plugins must use core-profile GL** to work in Resolume.
   Immediate-mode drawing is illegal in a core profile and macOS has no
   compatibility profile above 2.1.
-- **Licensed plugins will mostly refuse to load.** The bridge identifies itself
-  honestly as its own host, and many commercial OFX plugins only license
-  themselves to hosts they recognise. That is the vendor's decision and is not
-  worked around here.
-- **Parametric (curve) parameters are declined** — FFGL has no equivalent and any
+- **Licensed plugins will mostly refuse to load.** The bridge tells plugins the
+  truth about which host it is, and many commercial OFX plugins only license
+  themselves to hosts they recognise. That's the vendor's decision, and I don't
+  work around it here.
+- **Parametric (curve) parameters are declined**: FFGL has no equivalent, and any
   flattening would misrepresent the plugin's UI.
 - **Several wrapped plugins in one host need bundles made after v0.9.3.** Every
   wrapped plugin carries its own copy of the bridge's binary, and until this fix
@@ -275,17 +276,17 @@ ranges survive intact.
 
 ## Documentation
 
-- [docs/01-architecture.md](docs/01-architecture.md) — why a generator, and how a
+- [docs/01-architecture.md](docs/01-architecture.md): why a generator, and how a
   copied binary knows which plugin it is
-- [docs/02-parameter-mapping.md](docs/02-parameter-mapping.md) — how each OFX
+- [docs/02-parameter-mapping.md](docs/02-parameter-mapping.md): how each OFX
   parameter type becomes FFGL parameters
-- [docs/03-verification.md](docs/03-verification.md) — what is actually tested,
-  and what is not
-- [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md) — where a frame
+- [docs/03-verification.md](docs/03-verification.md): what is actually tested,
+  and what isn't
+- [docs/04-gpu-acceleration.md](docs/04-gpu-acceleration.md): where a frame
   actually goes, and which GPU paths exist
-- [docs/06-ofxprobe.md](docs/06-ofxprobe.md) — `ofxprobe` as a command-line
+- [docs/06-ofxprobe.md](docs/06-ofxprobe.md): `ofxprobe` as a command-line
   OpenFX test host: sequences, time, contexts, keyframes, `--quirks fusion`
-- [AGENTS.md](AGENTS.md) — onboarding, invariants and the traps found along the way
+- [AGENTS.md](AGENTS.md): onboarding, invariants and the traps found along the way
 
 <!-- attributions:start -->
 This project is built on other people's work — see [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
