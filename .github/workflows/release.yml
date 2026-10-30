@@ -12,7 +12,7 @@ name: release
 # Windows, because a hosted Windows runner has no OpenGL 4.1 core driver. See
 # docs/03-verification.md.
 #
-# macos-14 is arm64 and cross-compiles the x86_64 slice; the Intel macOS runners
+# macos-15 is arm64 and cross-compiles the x86_64 slice; the Intel macOS runners
 # are retired, so never target macos-13.
 #
 # The vcpkg triplet is x64-windows-static-md everywhere, and that is not a
@@ -242,7 +242,7 @@ jobs:
 
   build:
     name: macos-universal
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
