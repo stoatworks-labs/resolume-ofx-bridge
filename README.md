@@ -17,6 +17,8 @@ per plugin, each showing that plugin's real parameters, with their real names,
 units, ranges and groupings, in Resolume's own UI. No fixed pool of anonymous
 0–1 sliders.
 
+The [project page](https://stoatworks-labs.com/software/resolume-ofx-bridge/) has the downloads, the [user guide](https://stoatworks-labs.com/software/resolume-ofx-bridge/guide/) and the video.
+
 [![Watch it running (52 seconds)](docs/video-thumb-anyany.png)](https://www.youtube.com/watch?v=SbQ-FTbwG1s)
 
 *Any plugin format, any host. Every command in that video really ran.*
